@@ -19,7 +19,7 @@ To begin the server setup, run the following bootstrap script:
 
   ```bash
   # Download the bootstrap script using curl
-  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
+  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/refs/heads/main/scripts/bootstrap.sh
   
   # Make it executable
   chmod +x bootstrap.sh
