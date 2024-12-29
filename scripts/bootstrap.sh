@@ -8,12 +8,6 @@ REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
 CURRENT_USER=$(whoami)
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  echo "This script requires root privileges. Please run with sudo."
-  exit 1
-fi
-
 # Function to check for a program
 check_program() {
     if ! command -v "$1" &> /dev/null; then
@@ -27,6 +21,20 @@ check_program() {
         echo "$1 is already installed."
     fi
 }
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    if ! sudo -n true 2>/dev/null; then
+       echo "This script requires root or sudo privileges. Please run with sudo."
+       exit 1
+    else
+        echo "Running as non-root user with sudo privileges..."
+        IS_ROOT=false
+    fi
+else
+  echo "Running as root user..."
+  IS_ROOT=true
+fi
 
 # Update apt
 echo "Updating apt packages..."
@@ -53,12 +61,17 @@ if id -u "$USERNAME" &> /dev/null; then
     fi
 else
   # Create the new user and add to sudo
-  echo "Creating user $USERNAME..."
-  adduser "$USERNAME"
-  usermod -aG sudo "$USERNAME"
-  echo "User $USERNAME created and added to sudo group."
-fi
+    if $IS_ROOT; then
+      echo "Creating user $USERNAME..."
+      adduser "$USERNAME"
+      usermod -aG sudo "$USERNAME"
+      echo "User $USERNAME created and added to sudo group."
+    else
+      echo "You must create $USERNAME user for the setup. Please run the script as root to do this, or create the user manually and add to the sudo group"
+      exit 1
+    fi
 
+fi
 
 # Check if current user has sudo privileges
 if ! sudo -n true 2>/dev/null; then
