@@ -1,0 +1,12 @@
+n8n.yourdomain.com {
+    tls {
+        dns namecheap {
+          api_user    ${NAMECHEAP_USERNAME}
+          api_key     ${NAMECHEAP_API_KEY}
+          api_ip      ${NAMECHEAP_SOURCEIP}
+        }
+    }
+    reverse_proxy n8n:5678 {
+        flush_interval -1
+    }
+}

@@ -1,0 +1,71 @@
+services:
+
+  # ---------------------------------------------------------------------------------
+  # PostgreSQL database
+  # ---------------------------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - n8n_postgres_data:/var/lib/postgresql/data
+
+  # ---------------------------------------------------------------------------------
+  # n8n service
+  # ---------------------------------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      # n8n basics
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      
+      # Basic Auth
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+
+      # Encryption Key
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+
+      # Database configuration
+      - DB_TYPE=${DB_TYPE}
+      - DB_POSTGRESDB_HOST=${DB_POSTGRESDB_HOST}
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE}
+      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
+      - DB_POSTGRESDB_PORT=${DB_POSTGRESDB_PORT}
+      
+      # Optional: Additional environment variables
+      # - GENERIC_TIMEZONE=America/New_York
+      # - EXECUTIONS_PROCESS=main
+    volumes:
+      - n8n_data:/home/node/.n8n
+    # If you want n8n to handle webhooks directly without a sub-path:
+    # ports:
+    #   - "5678:5678"
+
+  # ---------------------------------------------------------------------------------
+  # Caddy reverse proxy
+  # ---------------------------------------------------------------------------------
+  caddy:
+    image: caddy:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"    # HTTP
+      - "443:443"  # HTTPS
+    volumes:
+      - caddy_data:/data
+      - ./config/Caddyfile:/etc/caddy/Caddyfile
+
+volumes:
+  caddy_data:
+  n8n_data:
+  n8n_postgres_data:

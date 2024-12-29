@@ -1,50 +1,66 @@
 # n8n Server Setup
 
-This repository automates the setup and deployment of n8n on an Ubuntu 22 VPS using Docker, Docker Compose, and Caddy for HTTPS.
 
-### Prerequisites
-- **Ubuntu 22.x VPS**: A fresh server installation is assumed.
-- **Root Access**: Initial scripts require root privileges.
+NOTE (12-29-2024) THIS IS A ROUGH DRAFT!
+
+This repository is a collection of scripts to help automate the setup and deployment of n8n on an Ubuntu 22 VPS using Docker, Docker Compose, and Caddy for HTTPS. It also includes Portainer for container management, PostgreSQL for n8n’s database, and instructions for advanced setups like VPN access and DNS-01 challenges.
+
+## 1. Prerequisites
+- **Ubuntu 22.x VPS:** A fresh server installation is assumed.
+- **Root Access:** Initial scripts require root privileges (to install packages, create users, etc.).
 - **DNS A Record**: Point `n8n.yourdomain.com` to your VPS IP. [Guide](https://www.namecheap.com/support/knowledgebase/article.aspx/319/2237/how-to-create-a-cname-record/).
+- **DNS-01 Capable Provider (Optional for fully private servers):**
+  - If you want to use DNS-01 for Let’s Encrypt, you need a DNS provider (e.g., Namecheap, Cloudflare) that offers an API.
+    - Example provided for Namecheap.
 
-## Setup Steps
+## General Overview
 
 1. Clone this repository:
-   ```bash
-   git clone https://github.com/DavidMcCauley/n8n_quick_setup.git
-   cd n8n_quick_setup
-Run the setup scripts in order:
+    ```bash
+    git clone https://github.com/DavidMcCauley/n8n_quick_setup.git
+    cd n8n_quick_setup
+    ```
 
-./scripts/setup-user.sh <username>
-./scripts/setup-fail2ban.sh
-./scripts/setup-ufw.sh
-./scripts/setup-docker.sh <username>
-Deploy n8n:
+2. Run the setup scripts in order:
+    ```bash
+    ./scripts/setup-user.sh <username>
+    ./scripts/setup-fail2ban.sh
+    ./scripts/setup-ufw.sh
+    ./scripts/setup-docker.sh <username>
+    ```
 
-./scripts/deploy-n8n.sh
-Access n8n at: https://n8n.yourdomain.com.
+3. Deploy n8n:
+    ```bash
+    ./scripts/deploy-n8n.sh
+    ```
 
-### **Directory Structure**
-```plaintext
+4. Access n8n at:
+    ```text
+    https://n8n.yourdomain.com
+    ```
+
+## 2. Repository Directory Structure
+
+```text
 n8n_quick_setup/
+├── config/
+│   ├── .env.example          # Environment variables for n8n
+│   ├── Caddyfile             # Caddy reverse proxy configuration
+│   ├── docker-compose.yml    # Docker Compose configuration
 ├── scripts/
-│   ├── setup-user.sh         # Creates a user and configures SSH
+│   ├── deploy-n8n.sh         # Deploys n8n and Caddy using Docker Compose
+│   ├── setup-docker.sh       # Installs Docker and Docker Compose
 │   ├── setup-fail2ban.sh     # Configures Fail2Ban
 │   ├── setup-ufw.sh          # Configures UFW
-│   ├── setup-docker.sh       # Installs Docker and Docker Compose
-│   ├── deploy-n8n.sh         # Deploys n8n and Caddy using Docker Compose
+│   ├── setup-user.sh         # Creates a user and configures SSH
 │   ├── update-n8n.sh         # Updates n8n and Caddy
-├── config/
-│   ├── .env                  # Environment variables for n8n + PostgreSQL
-│   ├── docker-compose.yml    # Docker Compose configuration
-│   ├── Caddyfile             # Caddy reverse proxy configuration
 ├── README.md                 # Instructions for usage
 ```
 
----
+## 3. Setup Scripts
 
-### **1. `setup-user.sh`**
-This script creates a non-root user, sets up SSH key authentication, and disables root login.
+### **3.1. `setup-user.sh`**
+Creates a non-root user, sets up SSH key authentication, and locks down root login.
 
 ```bash
 #!/bin/bash
@@ -60,8 +76,8 @@ if [ -z "$USERNAME" ]; then
 fi
 
 # Create a new user
-adduser $USERNAME
-usermod -aG sudo $USERNAME
+adduser "$USERNAME"
+usermod -aG sudo "$USERNAME"
 
 # Setup SSH key-based authentication
 mkdir -p /home/$USERNAME/.ssh
@@ -73,14 +89,15 @@ chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh
 sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
 sed -i "s/PermitRootLogin yes/PermitRootLogin no/" /etc/ssh/sshd_config
 sed -i "s/#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
-systemctl restart ssh
 
+systemctl restart ssh
 echo "User $USERNAME created and SSH configured on port $SSH_PORT."
+
 ```
 
 ---
 
-### **2. `setup-fail2ban.sh`**
+### **3.2. `setup-fail2ban.sh`**
 This script installs and configures Fail2Ban.
 
 ```bash
@@ -107,17 +124,17 @@ maxretry = 3
 EOF
 
 systemctl restart fail2ban
-echo "Fail2Ban installed and configured."
+echo "Fail2Ban installed and basic configuration added."
 ```
 
 ---
 
-### **3. `setup-ufw.sh`**
+### **3.3. `setup-ufw.sh`**
 This script sets up the UFW firewall.
 
 ```bash
 #!/bin/bash
-
+# setup-ufw.sh
 set -e
 
 echo "Configuring UFW..."
@@ -126,13 +143,14 @@ ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
+ufw status verbose
 
 echo "UFW configured and enabled."
 ```
 
 ---
 
-### **4. `setup-docker.sh`**
+### **3.4. `setup-docker.sh`**
 This script installs Docker and Docker Compose.
 
 ```bash
@@ -154,11 +172,12 @@ usermod -aG docker $USERNAME
 systemctl enable docker
 
 echo "Docker and Docker Compose installed."
+echo "You must log out and back in for group membership to take effect."
 ```
 
 ---
 
-### **5. `deploy-n8n.sh`**
+### **3.5. `deploy-n8n.sh`**
 This script deploys n8n and Caddy using Docker Compose.
 
 ```bash
@@ -178,7 +197,7 @@ echo "n8n and Caddy deployed successfully."
 
 ---
 
-### **6. `update-n8n.sh`**
+### **3.6. `update-n8n.sh`**
 This script updates n8n and Caddy.
 
 ```bash
@@ -196,7 +215,9 @@ echo "Update complete."
 
 ---
 
-### **7. `.env`**
+## 4. Configuration Files
+
+### **4.1. `.env.example`**
 Environment variables for n8n.
 
 ```dotenv
@@ -243,19 +264,24 @@ DB_POSTGRESDB_PORT=${POSTGRES_PORT}
 # ---------------------------------------------------------------------------------
 DOMAIN_NAME=n8n.yourdomain.com
 EMAIL=youremail@example.com
+
+# ---------------------------------------------------------------------------------
+# Use Portainer Community Edition (CE)
+# ---------------------------------------------------------------------------------
+PORTAINER_VERSION=latest
 ```
 
 ---
 
-### **8. `docker-compose.yml`**
-Defines the Docker services for n8n, Caddy and PostgreSQL (Version 15).
+### **4.2. `docker-compose.yml`**
+A multi-service stack with PostgreSQL, n8n, Caddy, and Portainer.
 
 ```yaml
 services:
 
-  # ---------------------------------------------------------------------------------
-  # PostgreSQL database
-  # ---------------------------------------------------------------------------------
+  # ----------------------------------------------------------------------------
+  # PostgreSQL database (for n8n)
+  # ----------------------------------------------------------------------------
   postgres:
     image: postgres:15
     restart: unless-stopped
@@ -266,9 +292,9 @@ services:
     volumes:
       - n8n_postgres_data:/var/lib/postgresql/data
 
-  # ---------------------------------------------------------------------------------
-  # n8n service
-  # ---------------------------------------------------------------------------------
+  # ----------------------------------------------------------------------------
+  # n8n workflow automation
+  # ----------------------------------------------------------------------------
   n8n:
     image: n8nio/n8n:${N8N_VERSION}
     restart: unless-stopped
@@ -295,19 +321,13 @@ services:
       - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
       - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
       - DB_POSTGRESDB_PORT=${DB_POSTGRESDB_PORT}
-      
-      # Optional: Additional environment variables
-      # - GENERIC_TIMEZONE=America/New_York
-      # - EXECUTIONS_PROCESS=main
+
     volumes:
       - n8n_data:/home/node/.n8n
-    # If you want n8n to handle webhooks directly without a sub-path:
-    # ports:
-    #   - "5678:5678"
 
-  # ---------------------------------------------------------------------------------
-  # Caddy reverse proxy
-  # ---------------------------------------------------------------------------------
+  # ----------------------------------------------------------------------------
+  # Caddy for reverse-proxy and auto-TLS
+  # ----------------------------------------------------------------------------
   caddy:
     image: caddy:latest
     restart: unless-stopped
@@ -318,19 +338,50 @@ services:
       - caddy_data:/data
       - ./config/Caddyfile:/etc/caddy/Caddyfile
 
+  # ----------------------------------------------------------------------------
+  # Portainer for container management
+  # ----------------------------------------------------------------------------
+  portainer:
+    image: portainer/portainer-ce:${PORTAINER_VERSION:-latest}
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # Expose Portainer on port 9000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+
 volumes:
-  caddy_data:
-  n8n_data:
   n8n_postgres_data:
+  n8n_data:
+  caddy_data:
+  portainer_data:
 ```
 
 ---
 
-### **9. `Caddyfile`**
+### **4.3. `Caddyfile`**
 Defines the Caddy reverse proxy configuration.
 
 ```caddyfile
 n8n.yourdomain.com {
+    reverse_proxy n8n:5678 {
+        flush_interval -1
+    }
+}
+```
+
+If you are using DNS-01 for your certificate generation you must replace this with:
+
+```caddyfile
+n8n.yourdomain.com {
+    tls {
+        dns namecheap {
+          api_user    ${NAMECHEAP_USERNAME}
+          api_key     ${NAMECHEAP_API_KEY}
+          api_ip      ${NAMECHEAP_SOURCEIP}
+        }
+    }
     reverse_proxy n8n:5678 {
         flush_interval -1
     }
@@ -346,9 +397,6 @@ To update n8n:
 ## Notes
 - Ensure your `.env` file has strong passwords and an encryption key.
 - Backup Docker volumes before updating.
-```
-
----
 
 ## **Backup & Restore**
 
@@ -365,6 +413,13 @@ You can store that `n8n_dump.sql` file off-server or in versioned backups.
 
 ```bash
 docker exec -i postgres psql -U "${POSTGRES_USER}" "${POSTGRES_DB}" < n8n_dump.sql
+```
+
+### **Volumes Backup**
+```bash
+# Example: backup n8n_data volume
+docker run --rm -v n8n_data:/data -v $(pwd):/backup ubuntu \
+    tar cvf /backup/n8n_data_backup.tar /data
 ```
 
 > **Tip**: For a more automated approach, you can run `pg_dump`/`psql` in a scheduled script or use a Docker-based backup container.
