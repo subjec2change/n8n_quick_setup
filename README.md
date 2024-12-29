@@ -13,31 +13,20 @@ This repository is a collection of scripts to help automate the setup and deploy
   - If you want to use DNS-01 for Let’s Encrypt, you need a DNS provider (e.g., Namecheap, Cloudflare) that offers an API.
     - Example provided for Namecheap.
 
-## General Overview
+## Quick Start
 
-1. Clone this repository:
-    ```bash
-    git clone https://github.com/DavidMcCauley/n8n_quick_setup.git
-    cd n8n_quick_setup
-    ```
+To begin the server setup, run the following bootstrap script:
 
-2. Run the setup scripts in order:
-    ```bash
-    ./scripts/setup-user.sh <username>
-    ./scripts/setup-fail2ban.sh
-    ./scripts/setup-ufw.sh
-    ./scripts/setup-docker.sh <username>
-    ```
-
-3. Deploy n8n:
-    ```bash
-    ./scripts/deploy-n8n.sh
-    ```
-
-4. Access n8n at:
-    ```text
-    https://n8n.yourdomain.com
-    ```
+  ```bash
+  # Download the bootstrap script using curl
+  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
+  
+  # Make it executable
+  chmod +x bootstrap.sh
+  
+  # Run the bootstrap script (this step will require sudo if you are not logged in as root)
+  sudo ./bootstrap.sh
+  ```
 
 ## 2. Repository Directory Structure
 
