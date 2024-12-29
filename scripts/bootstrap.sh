@@ -70,22 +70,18 @@ if ! sudo -n true 2>/dev/null; then
         echo "Cannot add to sudo group. Please add the user to the sudo group."
         exit 1
     fi
-
 fi
 
+# Clone the repo to the user home directory, change permissions, then switch user
+echo "Cloning repository from $REPO_URL to /home/$USERNAME..."
+sudo -u "$USERNAME" mkdir -p "/home/$USERNAME"
+sudo -u "$USERNAME" git clone "$REPO_URL" "/home/$USERNAME/$REPO_DIR"
 
-# Switch to the new user, create the repo directory, pull down the repo, and run the setup scripts
-echo "Switching to $USERNAME..."
+
+# Switch to the new user, and run setup scripts
+echo "Switching to $USERNAME and completing remaining setup..."
 sudo -u "$USERNAME" bash << EOF
-    if [ ! -d "$REPO_DIR" ]; then
-      # Clone the repository
-      echo "Cloning repository from $REPO_URL..."
-      git clone "$REPO_URL"
-    else
-      echo "Repository directory $REPO_DIR already exists. Please remove it or choose another location."
-      exit 1
-    fi
-    cd "$REPO_DIR"
+  cd "$REPO_DIR"
 
     # Set execution permissions on the scripts
     echo "Setting execute permissions on scripts..."
