@@ -85,11 +85,17 @@ if ! sudo -n true 2>/dev/null; then
     fi
 fi
 
-# Clone the repo to the user home directory, change permissions, then switch user
-echo "Cloning repository from $REPO_URL to /home/$USERNAME..."
-sudo -u "$USERNAME" mkdir -p "/home/$USERNAME"
-sudo -u "$USERNAME" git clone "$REPO_URL" "/home/$USERNAME/$REPO_DIR"
-
+# Check if target directory exists for the new user
+if [ -d "/home/$USERNAME/$REPO_DIR" ]; then
+    echo "Repository directory /home/$USERNAME/$REPO_DIR already exists."
+    echo "Setting $USERNAME as owner of this directory"
+    sudo chown -R "$USERNAME":"$USERNAME" "/home/$USERNAME/$REPO_DIR"
+else
+  # Clone the repo to the user home directory
+  echo "Cloning repository from $REPO_URL to /home/$USERNAME..."
+  sudo -u "$USERNAME" mkdir -p "/home/$USERNAME"
+  sudo -u "$USERNAME" git clone "$REPO_URL" "/home/$USERNAME/$REPO_DIR"
+fi
 
 # Switch to the new user, and run setup scripts
 echo "Switching to $USERNAME and completing remaining setup..."
