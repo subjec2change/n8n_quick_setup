@@ -19,7 +19,7 @@ This repository is a collection of scripts to help automate the setup and deploy
 A.  **Download Script:**
 
   ```bash
-  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
+  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/refs/heads/main/scripts/bootstrap.sh
   ```
 
 B.  **Make Executable:**
