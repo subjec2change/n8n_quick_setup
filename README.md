@@ -25,7 +25,8 @@ To begin the server setup, run the following bootstrap script:
   chmod +x bootstrap.sh
   
   # Run the bootstrap script (this step will require sudo if you are not logged in as root)
-  sudo ./bootstrap.sh
+  ./bootstrap.sh # as root or with sudo:
+  # sudo ./bootstrap.sh 
   ```
 
 ## 2. Repository Directory Structure
