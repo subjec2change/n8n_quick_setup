@@ -28,7 +28,7 @@ verify_command() {
         echo "Verification failed. Aborting the script at stage: $2"
         exit 1
     else
-        echo "Verification passed for $2"
+        echo "Verification passed for: $2"
     fi
 }
 
@@ -49,6 +49,14 @@ fi
 # --- STAGE 1: System Preparation ---
 echo "--- STAGE 1: System Preparation ---"
 
+# Prompt for username
+read -p "$USER_NAME_PROMPT " USERNAME
+
+if [ -z "$USERNAME" ]; then
+  echo "Username cannot be empty. Please try again."
+  exit 1
+fi
+
 # Update apt
 echo "Updating apt packages..."
 apt update
@@ -57,15 +65,6 @@ verify_command $? "apt update"
 # Check for git
 check_program git
 verify_command $? "git install check"
-
-
-# Prompt for username
-read -p "$USER_NAME_PROMPT " USERNAME
-
-if [ -z "$USERNAME" ]; then
-  echo "Username cannot be empty. Please try again."
-  exit 1
-fi
 
 # Check if the user already exists
 if id -u "$USERNAME" &> /dev/null; then
@@ -88,7 +87,6 @@ else
     fi
 
 fi
-
 
 # Check if current user has sudo privileges
 if ! sudo -n true 2>/dev/null; then
@@ -124,7 +122,6 @@ else
 fi
 echo "--- STAGE 2 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 3..."
-
 
 # --- STAGE 3: Configure and Deploy ---
 echo "--- STAGE 3: Configure and Deploy ---"
