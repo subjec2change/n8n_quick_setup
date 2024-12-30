@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verion .043
+# Verion .044
 
 set -e
 
@@ -56,8 +56,23 @@ echo "--- STAGE 1: System Preparation ---"
 
 # Update and Upgrade apt
 echo "Updating and Upgrading apt packages..."
-apt update && apt upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
+apt update
+UPDATES=$(apt list --upgradable 2>/dev/null | wc -l)
+apt upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
 verify_command $? "apt update && apt upgrade -y"
+
+# Check if updates were applied
+if [ "$UPDATES" -gt 1 ]; then
+    echo "$UPDATES packages were updated."
+    UPDATES_APPLIED=true
+else
+    UPDATES_APPLIED=false
+fi
+
+# Autoremove unnecessary packages
+echo "Removing unnecessary packages..."
+apt autoremove -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
+verify_command $? "apt autoremove -y"
 
 # Check for git
 check_program git
@@ -67,7 +82,30 @@ verify_command $? "git install check"
 check_program vim
 verify_command $? "vim install check"
 
-echo "--- STAGE 1 Preliminary Checks Completed Successfully ---"
+# Check if a reboot is needed
+REBOOT_REQUIRED=$(ls /var/run/reboot-required 2> /dev/null)
+if [ -n "$REBOOT_REQUIRED" ]; then
+    echo "--- STAGE 1 Requires Reboot ---"
+    echo "A system reboot is required to complete updates."
+    echo "After the reboot, please run the script again using this command: sudo ./bootstrap.sh"
+    echo "Rebooting in 5 seconds..."
+    sleep 5
+    sudo reboot
+fi
+
+# Remove bootstrap.sh if we got here
+if [ -f "bootstrap.sh" ]; then
+  echo "Removing $0..."
+  rm "$0"
+fi
+
+if $UPDATES_APPLIED; then
+    echo "--- STAGE 1 Completed With Changes ---"
+    echo "Updates were applied to the system."
+else
+    echo "--- STAGE 1 Completed Without Changes ---"
+    echo "No updates were applied to the system."
+fi
 
 # Prompt for username
 read -p "$USER_NAME_PROMPT " USERNAME
@@ -123,45 +161,6 @@ verify_command $? "Setting default vim colorscheme for all users"
 echo "Setting vim colorscheme to '$VIM_COLORSCHEME' for user '$USERNAME'..."
 echo "colorscheme $VIM_COLORSCHEME" | sudo -u "$USERNAME" tee /home/"$USERNAME"/.vimrc
 verify_command $? "Setting vim colorscheme for user '$USERNAME'"
-
-# Check if a reboot is needed
-REBOOT_REQUIRED=$(ls /var/run/reboot-required 2> /dev/null)
-if [ -n "$REBOOT_REQUIRED" ]; then
-    echo "--- STAGE 1 Requires Reboot ---"
-    echo "A system reboot is required to complete updates."
-    echo "After the reboot, please run the script again using this command: sudo ./bootstrap.sh"
-    echo "Rebooting in 5 seconds..."
-    sleep 5
-    sudo reboot
-else
-    echo "--- STAGE 1 Completed Successfully ---"
-fi
-
-# Remove bootstrap.sh if we got here
-if [ -f "bootstrap.sh" ]; then
-  echo "Removing $0..."
-  rm "$0"
-fi
-
-# Check if updates were applied
-if [ "$UPDATES" -gt 1 ]; then
-    echo "--- STAGE 1 Completed With Changes ---"
-    echo "Updates were applied to the system."
-else
-    echo "--- STAGE 1 Completed Without Changes ---"
-    echo "No updates were applied to the system."
-fi
-
-# Autoremove unnecessary packages
-echo "Removing unnecessary packages..."
-apt autoremove -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
-verify_command $? "apt autoremove -y"
-
-read -p "Do you want to continue setup under $USERNAME? (y/N) " CONTINUE
-if [[ "$CONTINUE" != "y" && "$CONTINUE" != "Y" ]]; then
-  echo "Aborting setup."
-  exit 0
-fi
 
 read -n 1 -s -r -p "Press any key to continue to Stage 2..."
 
