@@ -6,12 +6,12 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Variables
-SCRIPT_VERSION="0.047"
 REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
 CURRENT_USER=$(whoami)
 VIM_COLORSCHEME="desert"  # Default colorscheme
+SCRIPT_VERSION="0.048"
 
 # Function to check for a program
 check_program() {
@@ -154,7 +154,7 @@ fi
 echo "Setting default vim colorscheme to 'desert' for all users..."
 echo "set background=dark
 colorscheme $VIM_COLORSCHEME
-" | tee /etc/vim/vimrc.local
+" | sudo tee /etc/vim/vimrc.local
 verify_command $? "Setting default vim colorscheme for all users"
 
 # Set a better vim colorscheme for current user
