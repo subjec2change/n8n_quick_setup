@@ -1,5 +1,4 @@
 #!/bin/bash
-# Verion .047
 
 set -e
 
@@ -7,7 +6,8 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Variables
-REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"  # Replace with your actual repo URL
+SCRIPT_VERSION="0.047"
+REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
 CURRENT_USER=$(whoami)
@@ -50,6 +50,8 @@ else
   echo "Running as root user..."
   IS_ROOT=true
 fi
+
+echo "n8n Quick Setup Bootstrap.sh version: v$SCRIPT_VERSION"
 
 # --- STAGE 1: System Preparation ---
 echo "--- STAGE 1: System Preparation ---"
