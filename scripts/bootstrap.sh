@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verion .045
+# Verion .046
 
 set -e
 
@@ -61,14 +61,6 @@ UPDATES=$(apt list --upgradable 2>/dev/null | wc -l)
 apt upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
 verify_command $? "apt update && apt upgrade -y"
 
-# Check if updates were applied
-if [ "$UPDATES" -gt 1 ]; then
-    echo "$UPDATES packages were updated."
-    UPDATES_APPLIED=true
-else
-    UPDATES_APPLIED=false
-fi
-
 # Autoremove unnecessary packages
 echo "Removing unnecessary packages..."
 apt autoremove -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
@@ -82,9 +74,16 @@ verify_command $? "git install check"
 check_program vim
 verify_command $? "vim install check"
 
+# Check if updates were applied
+if [ "$UPDATES" -gt 1 ]; then
+    UPDATES_APPLIED=true
+else
+    UPDATES_APPLIED=false
+fi
+
 # Check if a reboot is needed
 REBOOT_REQUIRED=$(ls /var/run/reboot-required 2> /dev/null)
-if [ -n "$REBOOT_REQUIRED" ]; then
+if [ -n "$REBOOT_REQUIRED" ] && $UPDATES_APPLIED; then
     echo "--- STAGE 1 Requires Reboot ---"
     echo "A system reboot is required to complete updates."
     if [ "$IS_ROOT" = true ]; then
@@ -96,12 +95,6 @@ if [ -n "$REBOOT_REQUIRED" ]; then
     echo "Rebooting in 5 seconds..."
     sleep 5
     sudo reboot
-fi
-
-# Remove bootstrap.sh if we got here
-if [ -f "bootstrap.sh" ]; then
-  echo "Removing $0..."
-  rm "$0"
 fi
 
 if $UPDATES_APPLIED; then
