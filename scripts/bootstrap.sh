@@ -4,13 +4,13 @@ set -e
 
 ###############################################################################
 # n8n Quick Setup Bootstrap Script
-# Version: 0.050
+# Version: 0.051
 ###############################################################################
 
 # --- GLOBAL CONFIG & ENVIRONMENT ---
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.050"
+SCRIPT_VERSION="0.051"
 REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
@@ -33,7 +33,6 @@ check_program() {
 }
 
 verify_command() {
-  # Checks exit code of last command ($1) and prints the stage ($2)
   if [ "$1" -ne 0 ]; then
     echo "Verification failed. Aborting the script at stage: $2"
     exit 1
@@ -142,6 +141,9 @@ else
   fi
 fi
 
+# Ensure the user’s home dir is at least drwx--x--x (711) so the user can traverse
+chmod 711 /home/"$USERNAME"
+
 # Confirm current user has sudo privileges
 if ! sudo -n true 2>/dev/null; then
   echo "Current user does not have sudo privileges."
@@ -187,6 +189,9 @@ else
   verify_command $? "Clone repository"
 fi
 
+# Also ensure the n8n_quick_setup folder is fully accessible to the user
+sudo chmod -R u+rwx "/home/$USERNAME/$REPO_DIR"
+
 echo "--- STAGE 3 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 4..."
 
@@ -197,28 +202,41 @@ echo ""
 echo "--- STAGE 4: Configure and Deploy ---"
 echo "Switching to $USERNAME and completing remaining setup..."
 
-sudo -u "$USERNAME" bash << EOF
-  cd "$REPO_DIR"
+sudo -u "$USERNAME" bash << 'EOF'
+set -e
 
-  echo "Setting execute permissions on scripts..."
-  chmod +x scripts/*.sh
-  verify_command \$? "Setting permissions"
+# Re-declare verify_command inside the subshell:
+verify_command() {
+  if [ "$1" -ne 0 ]; then
+    echo "Verification failed. Aborting the script at stage: $2"
+    exit 1
+  else
+    echo "Verification passed for: $2"
+  fi
+}
 
-  echo "Running setup scripts..."
-  ./scripts/setup-user.sh "$USERNAME"
-  verify_command \$? "Running setup-user.sh"
+echo "Moving into n8n_quick_setup..."
+cd "n8n_quick_setup"
 
-  ./scripts/setup-fail2ban.sh
-  verify_command \$? "Running setup-fail2ban.sh"
+echo "Setting execute permissions on scripts..."
+chmod +x scripts/*.sh
+verify_command $? "Setting permissions"
 
-  ./scripts/setup-ufw.sh
-  verify_command \$? "Running setup-ufw.sh"
+echo "Running setup scripts..."
+./scripts/setup-user.sh "$USER"
+verify_command $? "Running setup-user.sh"
 
-  ./scripts/setup-docker.sh "$USERNAME"
-  verify_command \$? "Running setup-docker.sh"
+./scripts/setup-fail2ban.sh
+verify_command $? "Running setup-fail2ban.sh"
 
-  echo "Bootstrap process completed."
-  echo "Navigate to the $REPO_DIR folder to proceed with the next steps in the README."
+./scripts/setup-ufw.sh
+verify_command $? "Running setup-ufw.sh"
+
+./scripts/setup-docker.sh "$USER"
+verify_command $? "Running setup-docker.sh"
+
+echo "Bootstrap process completed."
+echo "Navigate to the n8n_quick_setup folder to proceed with the next steps in the README."
 EOF
 
 echo "--- STAGE 4 Completed Successfully ---"
