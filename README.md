@@ -16,24 +16,38 @@ This repository is a collection of scripts to help automate the setup and deploy
 
 ## 2. Quick Start
 
-To begin the server setup, start with getting the bootstrap script:
-  ```bash
-  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
-  ```
+A.  **Download Script:**
+    ```bash
+    curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
+    ```
 
-Make it executable
-  ```bash
-  chmod +x bootstrap.sh
-  ```
+B.  **Make Executable:**
+    ```bash
+    chmod +x bootstrap.sh
+    ```
 
-Run the bootstrap script (this step will require sudo if you are not logged in as root)
-  ```bash
-  ./bootstrap.sh 
-  # or
-  sudo ./bootstrap.sh 
-  ```
+C.  **Run (as root or with sudo):**
+    ```bash
+    ./bootstrap.sh 
+    # or
+    sudo ./bootstrap.sh 
+    ```
+D.  **Follow the Prompts:**
 
-## 2. Repository Directory Structure
+    * The script will perform all the checks, upgrades, and git installs, and then it will prompt for the desired user name.
+    * If updates are required, the script will perform the updates and a reboot. You must run the script again after the reboot to complete setup.
+    * If no updates are found, the script will continue with the setup process.
+
+E.  **Verify:**
+    * After each stage, verify that all commands executed as expected, and then press a key to continue to the next stage.
+
+F.  **Complete Setup:**
+    * Once all stages are complete, navigate to the `n8n_quick_setup` directory and continue setup.
+    ```bash
+    cd n8n_quick_setup
+    ```
+
+## 3. Repository Directory Structure
 
 ```text
 n8n_quick_setup/
@@ -51,9 +65,9 @@ n8n_quick_setup/
 ├── README.md                 # Instructions for usage
 ```
 
-## 3. Setup Scripts
+## 4. Setup Scripts
 
-### **3.1. `setup-user.sh`**
+### **4.1. `setup-user.sh`**
 Creates a non-root user, sets up SSH key authentication, and locks down root login.
 
 ```bash
@@ -91,7 +105,7 @@ echo "User $USERNAME created and SSH configured on port $SSH_PORT."
 
 ---
 
-### **3.2. `setup-fail2ban.sh`**
+### **4.2. `setup-fail2ban.sh`**
 This script installs and configures Fail2Ban.
 
 ```bash
@@ -123,7 +137,7 @@ echo "Fail2Ban installed and basic configuration added."
 
 ---
 
-### **3.3. `setup-ufw.sh`**
+### **4.3. `setup-ufw.sh`**
 This script sets up the UFW firewall.
 
 ```bash
@@ -144,7 +158,7 @@ echo "UFW configured and enabled."
 
 ---
 
-### **3.4. `setup-docker.sh`**
+### **4.4. `setup-docker.sh`**
 This script installs Docker and Docker Compose.
 
 ```bash
@@ -171,7 +185,7 @@ echo "You must log out and back in for group membership to take effect."
 
 ---
 
-### **3.5. `deploy-n8n.sh`**
+### **4.5. `deploy-n8n.sh`**
 This script deploys n8n and Caddy using Docker Compose.
 
 ```bash
@@ -191,7 +205,7 @@ echo "n8n and Caddy deployed successfully."
 
 ---
 
-### **3.6. `update-n8n.sh`**
+### **4.6. `update-n8n.sh`**
 This script updates n8n and Caddy.
 
 ```bash
@@ -209,9 +223,9 @@ echo "Update complete."
 
 ---
 
-## 4. Configuration Files
+## 5. Configuration Files
 
-### **4.1. `.env.example`**
+### **5.1. `.env.example`**
 Environment variables for n8n.
 
 ```dotenv
@@ -267,7 +281,7 @@ PORTAINER_VERSION=latest
 
 ---
 
-### **4.2. `docker-compose.yml`**
+### **5.2. `docker-compose.yml`**
 A multi-service stack with PostgreSQL, n8n, Caddy, and Portainer.
 
 ```yaml
@@ -354,7 +368,7 @@ volumes:
 
 ---
 
-### **4.3. `Caddyfile`**
+### **5.3. `Caddyfile`**
 Defines the Caddy reverse proxy configuration.
 
 ```caddyfile

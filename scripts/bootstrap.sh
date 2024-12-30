@@ -50,6 +50,18 @@ fi
 # --- STAGE 1: System Preparation ---
 echo "--- STAGE 1: System Preparation ---"
 
+
+# Update and Upgrade apt
+echo "Updating and Upgrading apt packages..."
+apt update && apt upgrade -y
+verify_command $? "apt update && apt upgrade -y"
+
+# Check for git
+check_program git
+verify_command $? "git install check"
+
+echo "--- STAGE 1 Completed Successfully ---"
+
 # Prompt for username
 read -p "$USER_NAME_PROMPT " USERNAME
 
@@ -58,25 +70,7 @@ if [ -z "$USERNAME" ]; then
   exit 1
 fi
 
-# Check for pending updates
-UPGRADABLE=$(apt list --upgradable 2> /dev/null | wc -l)
 
-# Update and Upgrade apt
-if [ "$UPGRADABLE" -gt 0 ]; then
-    echo "Updating and Upgrading apt packages..."
-    apt update && apt upgrade -y
-    verify_command $? "apt update && apt upgrade -y"
-    echo "Reboot is required to apply updates. Please re-run this script after reboot"
-    sudo reboot
-    exit
-else
-  echo "No updates to apply at this time."
-  echo "Skipping to next Stage"
-fi
-
-# Check for git
-check_program git
-verify_command $? "git install check"
 
 # Check if the user already exists
 if id -u "$USERNAME" &> /dev/null; then
@@ -100,6 +94,7 @@ else
 
 fi
 
+
 # Check if current user has sudo privileges
 if ! sudo -n true 2>/dev/null; then
     echo "Current user does not have sudo privileges."
@@ -113,7 +108,6 @@ if ! sudo -n true 2>/dev/null; then
     fi
 fi
 
-echo "--- STAGE 1 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 2..."
 
 
@@ -133,7 +127,6 @@ else
     sudo -u "$USERNAME" git clone "$REPO_URL" "/home/$USERNAME/$REPO_DIR"
     verify_command $? "Clone repository"
 fi
-
 echo "--- STAGE 2 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 3..."
 
