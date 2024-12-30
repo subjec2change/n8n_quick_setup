@@ -3,11 +3,11 @@ set -e
 
 ###############################################################################
 # n8n Quick Setup Bootstrap Script
-#  - Supports reruns with a status file
-#  - Applies correct directory permissions for the user's home and repo
-#  - Gathers environment info
+#  - Enhanced logging of permissions
+#  - Persists the chosen username in a status file for Stage 4 usage
+#  - Idempotent: can safely rerun multiple times
 #
-# Version: 0.061
+# Version: 0.070
 ###############################################################################
 
 ###############################################################################
@@ -15,7 +15,7 @@ set -e
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.061"
+SCRIPT_VERSION="0.070"
 REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
@@ -25,11 +25,10 @@ STATUS_FILE="/tmp/n8n_bootstrap_status"
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
-log() { echo -e "[LOG] $*"; }
-err() { echo -e "[ERR] $*" >&2; }
+log()  { echo -e "[LOG] $*"; }
+err()  { echo -e "[ERR] $*" >&2; }
 
 check_program() {
-  # Installs a given package if it's not already installed
   if ! command -v "$1" &>/dev/null; then
     log "Installing $1..."
     apt update && apt install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "$1"
@@ -52,13 +51,24 @@ verify_command() {
 }
 
 mark_stage_completed() {
-  # Writes a marker to the status file
+  # Writes a marker line into the status file
   echo "$1" >> "$STATUS_FILE"
 }
 
 is_stage_completed() {
   # Checks if the status file contains a specific line
   grep -qx "$1" "$STATUS_FILE" 2>/dev/null
+}
+
+store_user_in_status() {
+  # If a user is chosen, store it in status file as: CURRENT_BOOTSTRAP_USER=david
+  sed -i '/^CURRENT_BOOTSTRAP_USER=/d' "$STATUS_FILE" 2>/dev/null || true
+  echo "CURRENT_BOOTSTRAP_USER=$1" >> "$STATUS_FILE"
+}
+
+read_user_from_status() {
+  # Parse the user name from a line like: CURRENT_BOOTSTRAP_USER=david
+  grep '^CURRENT_BOOTSTRAP_USER=' "$STATUS_FILE" 2>/dev/null | cut -d= -f2
 }
 
 ###############################################################################
@@ -77,7 +87,7 @@ else
   IS_ROOT=true
 fi
 
-log "n8n Quick Setup Bootstrap.sh version: v${SCRIPT_VERSION}"
+log "n8n Quick Setup Bootstrap.sh version: v$SCRIPT_VERSION"
 
 ###############################################################################
 # ENVIRONMENT PRE-CHECK: Gather Info About the System
@@ -85,6 +95,7 @@ log "n8n Quick Setup Bootstrap.sh version: v${SCRIPT_VERSION}"
 OS_NAME="$(. /etc/os-release; echo "$NAME")"
 OS_VERSION="$(. /etc/os-release; echo "$VERSION")"
 HOSTNAME_INFO="$(hostname)"
+
 log "Environment Info:"
 log "  OS: $OS_NAME $OS_VERSION"
 log "  Hostname: $HOSTNAME_INFO"
@@ -118,6 +129,7 @@ else
   check_program vim
   verify_command $? "vim install check"
 
+  # Determine if any upgrades actually happened
   if [ "$UPDATES" -gt 1 ]; then
     UPDATES_APPLIED=true
   else
@@ -133,7 +145,7 @@ else
     else
       REBOOT_CMD="sudo ./bootstrap.sh"
     fi
-    log "After the reboot, please run the script again using: $REBOOT_CMD"
+    log "After reboot, rerun the script with: $REBOOT_CMD"
     log "Rebooting in 5 seconds..."
     sleep 5
     sudo reboot
@@ -182,11 +194,21 @@ else
     fi
   fi
 
+  # Store the user in the status file so we can read it in Stage 4
+  store_user_in_status "$USERNAME"
+
+  # Log the current permission on /home/$USERNAME
+  log "Before chmod, /home/$USERNAME permission is:"
+  ls -ld "/home/$USERNAME" || true
+
   # Ensure the user’s home dir is at least drwx--x--x (711)
-  log "Adjusting /home/$USERNAME permissions to 711..."
+  log "Applying 711 to /home/$USERNAME..."
   chmod 711 "/home/$USERNAME"
 
-  # Confirm current user has sudo privileges
+  log "After chmod, /home/$USERNAME permission is:"
+  ls -ld "/home/$USERNAME" || true
+
+  # Confirm we (the script runner) have sudo privileges
   if ! sudo -n true 2>/dev/null; then
     err "Current user does not have sudo privileges."
     if id -u "$USERNAME" &>/dev/null; then
@@ -200,13 +222,13 @@ else
   fi
 
   # Set the default vim colorscheme for all users
-  log "Setting default vim colorscheme to '$VIM_COLORSCHEME' for all users..."
+  log "Setting default vim colorscheme to '$VIM_COLORSCHEME' (via /etc/vim/vimrc.local)..."
   echo "set background=dark
 colorscheme $VIM_COLORSCHEME
 " | sudo tee /etc/vim/vimrc.local
   verify_command $? "Setting default vim colorscheme for all users"
 
-  # Set a better vim colorscheme for the chosen user
+  # Also set a personal .vimrc for the chosen user
   log "Setting vim colorscheme to '$VIM_COLORSCHEME' for user '$USERNAME'..."
   echo "colorscheme $VIM_COLORSCHEME" | sudo -u "$USERNAME" tee "/home/$USERNAME/.vimrc"
   verify_command $? "Setting vim colorscheme for user '$USERNAME'"
@@ -225,26 +247,38 @@ log "--- STAGE 3: Clone the Repository ---"
 if is_stage_completed "STAGE_3_COMPLETED"; then
   log "Stage 3 was previously completed. Skipping..."
 else
-  if [ ! -d "/home/$USERNAME" ]; then
-    err "Home directory /home/$USERNAME not found. Did Stage 2 complete?"
+  # Retrieve the chosen user from the status file
+  BOOT_USER="$(read_user_from_status)"
+  if [ -z "$BOOT_USER" ]; then
+    err "No user found in status file. Did Stage 2 complete?"
     exit 1
   fi
 
-  if [ -d "/home/$USERNAME/$REPO_DIR" ]; then
-    log "Repository directory /home/$USERNAME/$REPO_DIR already exists."
-    log "Setting $USERNAME as owner of this directory"
-    sudo chown -R "$USERNAME":"$USERNAME" "/home/$USERNAME/$REPO_DIR"
+  if [ ! -d "/home/$BOOT_USER" ]; then
+    err "Home directory /home/$BOOT_USER not found. Did Stage 2 complete?"
+    exit 1
+  fi
+
+  if [ -d "/home/$BOOT_USER/$REPO_DIR" ]; then
+    log "Repository directory /home/$BOOT_USER/$REPO_DIR already exists."
+    log "Setting $BOOT_USER as owner of this directory"
+    sudo chown -R "$BOOT_USER":"$BOOT_USER" "/home/$BOOT_USER/$REPO_DIR"
     verify_command $? "Ownership transfer complete"
   else
-    log "Cloning repository from $REPO_URL to /home/$USERNAME..."
-    sudo -u "$USERNAME" mkdir -p "/home/$USERNAME"
-    sudo -u "$USERNAME" git clone "$REPO_URL" "/home/$USERNAME/$REPO_DIR"
+    log "Cloning repository from $REPO_URL to /home/$BOOT_USER..."
+    sudo -u "$BOOT_USER" mkdir -p "/home/$BOOT_USER"
+    sudo -u "$BOOT_USER" git clone "$REPO_URL" "/home/$BOOT_USER/$REPO_DIR"
     verify_command $? "Clone repository"
   fi
 
-  # Make sure the user can read/execute everything in that folder
-  log "Applying u+rwx to /home/$USERNAME/$REPO_DIR..."
-  sudo chmod -R u+rwx "/home/$USERNAME/$REPO_DIR"
+  log "Before chmod, /home/$BOOT_USER/$REPO_DIR permission is:"
+  ls -ld "/home/$BOOT_USER/$REPO_DIR" || true
+
+  log "Applying u+rwx to /home/$BOOT_USER/$REPO_DIR..."
+  sudo chmod -R u+rwx "/home/$BOOT_USER/$REPO_DIR"
+
+  log "After chmod, /home/$BOOT_USER/$REPO_DIR permission is:"
+  ls -ld "/home/$BOOT_USER/$REPO_DIR" || true
 
   mark_stage_completed "STAGE_3_COMPLETED"
 fi
@@ -260,10 +294,16 @@ log "--- STAGE 4: Configure and Deploy ---"
 if is_stage_completed "STAGE_4_COMPLETED"; then
   log "Stage 4 was previously completed. Skipping..."
 else
-  log "Switching to $USERNAME and completing remaining setup..."
+  # Retrieve the chosen user from the status file
+  BOOT_USER="$(read_user_from_status)"
+  if [ -z "$BOOT_USER" ]; then
+    err "No user found. Did Stage 2 complete?"
+    exit 1
+  fi
 
-  # We'll re-declare verify_command in the subshell, because functions aren't inherited
-  sudo -u "$USERNAME" bash << 'HEREDOC'
+  log "Switching to $BOOT_USER and completing remaining setup..."
+
+  sudo -u "$BOOT_USER" bash << 'HEREDOC'
     set -e
 
     verify_command() {
@@ -300,7 +340,6 @@ else
 HEREDOC
 
   mark_stage_completed "STAGE_4_COMPLETED"
+  log "--- STAGE 4 Completed Successfully ---"
+  log "All stages completed!"
 fi
-
-log "--- STAGE 4 Completed Successfully ---"
-log "All stages completed!"
