@@ -46,6 +46,7 @@ else
   IS_ROOT=true
 fi
 
+
 # --- STAGE 1: System Preparation ---
 echo "--- STAGE 1: System Preparation ---"
 
@@ -57,10 +58,21 @@ if [ -z "$USERNAME" ]; then
   exit 1
 fi
 
-# Update apt
-echo "Updating apt packages..."
-apt update
-verify_command $? "apt update"
+# Check for pending updates
+UPGRADABLE=$(apt list --upgradable 2> /dev/null | wc -l)
+
+# Update and Upgrade apt
+if [ "$UPGRADABLE" -gt 0 ]; then
+    echo "Updating and Upgrading apt packages..."
+    apt update && apt upgrade -y
+    verify_command $? "apt update && apt upgrade -y"
+    echo "Reboot is required to apply updates. Please re-run this script after reboot"
+    sudo reboot
+    exit
+else
+  echo "No updates to apply at this time."
+  echo "Skipping to next Stage"
+fi
 
 # Check for git
 check_program git
@@ -104,6 +116,7 @@ fi
 echo "--- STAGE 1 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 2..."
 
+
 # --- STAGE 2: Clone the Repository ---
 echo "--- STAGE 2: Clone the Repository ---"
 
@@ -120,8 +133,10 @@ else
     sudo -u "$USERNAME" git clone "$REPO_URL" "/home/$USERNAME/$REPO_DIR"
     verify_command $? "Clone repository"
 fi
+
 echo "--- STAGE 2 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 3..."
+
 
 # --- STAGE 3: Configure and Deploy ---
 echo "--- STAGE 3: Configure and Deploy ---"
@@ -141,9 +156,9 @@ sudo -u "$USERNAME" bash << EOF
     ./scripts/setup-user.sh "$USERNAME"
     verify_command $? "Running setup-user.sh"
     ./scripts/setup-fail2ban.sh
-     verify_command $? "Running setup-fail2ban.sh"
+    verify_command $? "Running setup-fail2ban.sh"
     ./scripts/setup-ufw.sh
-     verify_command $? "Running setup-ufw.sh"
+    verify_command $? "Running setup-ufw.sh"
     ./scripts/setup-docker.sh "$USERNAME"
     verify_command $? "Running setup-docker.sh"
 
