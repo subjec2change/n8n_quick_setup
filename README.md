@@ -17,35 +17,36 @@ This repository is a collection of scripts to help automate the setup and deploy
 ## 2. Quick Start
 
 A.  **Download Script:**
-    ```bash
-    curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
-    ```
+
+  ```bash
+  curl -o bootstrap.sh https://raw.githubusercontent.com/DavidMcCauley/n8n_quick_setup/main/bootstrap.sh
+  ```
 
 B.  **Make Executable:**
-    ```bash
-    chmod +x bootstrap.sh
-    ```
+  ```bash
+  chmod +x bootstrap.sh
+  ```
 
 C.  **Run (as root or with sudo):**
-    ```bash
-    ./bootstrap.sh 
-    # or
-    sudo ./bootstrap.sh 
-    ```
+  ```bash
+  ./bootstrap.sh 
+  # or
+  sudo ./bootstrap.sh 
+  ```
 D.  **Follow the Prompts:**
 
-    * The script will perform all the checks, upgrades, and git installs, and then it will prompt for the desired user name.
-    * If updates are required, the script will perform the updates and a reboot. You must run the script again after the reboot to complete setup.
-    * If no updates are found, the script will continue with the setup process.
+  * The script will perform all the checks, upgrades, and git installs, and then it will prompt for the desired user name.
+  * If updates are required, the script will perform the updates and a reboot. You must run the script again after the reboot to complete setup.
+  * If no updates are found, the script will continue with the setup process.
 
 E.  **Verify:**
-    * After each stage, verify that all commands executed as expected, and then press a key to continue to the next stage.
+  * After each stage, verify that all commands executed as expected, and then press a key to continue to the next stage.
 
 F.  **Complete Setup:**
-    * Once all stages are complete, navigate to the `n8n_quick_setup` directory and continue setup.
-    ```bash
-    cd n8n_quick_setup
-    ```
+  * Once all stages are complete, navigate to the `n8n_quick_setup` directory and continue setup.
+  ```bash
+  cd n8n_quick_setup
+  ```
 
 ## 3. Repository Directory Structure
 
