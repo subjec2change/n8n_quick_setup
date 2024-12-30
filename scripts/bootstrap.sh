@@ -6,12 +6,12 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Variables
-REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
+REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"  # Replace with your actual repo URL
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
 CURRENT_USER=$(whoami)
 VIM_COLORSCHEME="desert"  # Default colorscheme
-SCRIPT_VERSION="0.048"
+SCRIPT_VERSION="0.049"
 
 # Function to check for a program
 check_program() {
