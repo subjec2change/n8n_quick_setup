@@ -2,6 +2,9 @@
 
 set -e
 
+# Set environment variable for noninteractive prompts
+export DEBIAN_FRONTEND=noninteractive
+
 # Variables
 REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"  # Replace with your actual repo URL
 REPO_DIR="n8n_quick_setup"
@@ -46,10 +49,16 @@ else
   IS_ROOT=true
 fi
 
-
 # --- STAGE 1: System Preparation ---
 echo "--- STAGE 1: System Preparation ---"
 
+# Prompt for username
+read -p "$USER_NAME_PROMPT " USERNAME
+
+if [ -z "$USERNAME" ]; then
+  echo "Username cannot be empty. Please try again."
+  exit 1
+fi
 
 # Update and Upgrade apt
 echo "Updating and Upgrading apt packages..."
@@ -61,16 +70,6 @@ check_program git
 verify_command $? "git install check"
 
 echo "--- STAGE 1 Completed Successfully ---"
-
-# Prompt for username
-read -p "$USER_NAME_PROMPT " USERNAME
-
-if [ -z "$USERNAME" ]; then
-  echo "Username cannot be empty. Please try again."
-  exit 1
-fi
-
-
 
 # Check if the user already exists
 if id -u "$USERNAME" &> /dev/null; then
@@ -93,7 +92,6 @@ else
     fi
 
 fi
-
 
 # Check if current user has sudo privileges
 if ! sudo -n true 2>/dev/null; then
