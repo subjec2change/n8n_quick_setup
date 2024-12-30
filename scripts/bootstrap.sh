@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# Verion .09
 set -e
 
 # Set environment variable for noninteractive prompts
@@ -15,7 +15,7 @@ CURRENT_USER=$(whoami)
 check_program() {
     if ! command -v "$1" &> /dev/null; then
         echo "Installing $1..."
-        apt update && apt install -y "$1"
+        apt update && apt install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y "$1"
         if ! command -v "$1" &> /dev/null; then
             echo "Error installing $1. Please ensure the package exists and is installed"
             exit 1
@@ -55,12 +55,13 @@ echo "--- STAGE 1: System Preparation ---"
 
 # Update and Upgrade apt
 echo "Updating and Upgrading apt packages..."
-apt update && apt upgrade -y
+apt update && apt upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
 verify_command $? "apt update && apt upgrade -y"
 
 # Check for git
 check_program git
 verify_command $? "git install check"
+
 
 echo "--- STAGE 1 Completed Successfully ---"
 
