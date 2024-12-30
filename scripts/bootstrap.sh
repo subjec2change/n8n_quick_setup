@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verion .041
+# Verion .042
 
 set -e
 
@@ -7,7 +7,7 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Variables
-REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"  # Replace with your actual repo URL
+REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
 CURRENT_USER=$(whoami)
@@ -55,14 +55,52 @@ echo "--- STAGE 1: System Preparation ---"
 
 # Update and Upgrade apt
 echo "Updating and Upgrading apt packages..."
-apt update && apt upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
+apt update
+UPDATES=$(apt list --upgradable 2>/dev/null | wc -l)
+apt upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
 verify_command $? "apt update && apt upgrade -y"
+
+# Check if updates were applied
+if [ "$UPDATES" -gt 1 ]; then
+    echo "$UPDATES packages were updated."
+    UPDATES_APPLIED=true
+else
+    UPDATES_APPLIED=false
+fi
+
+# Autoremove unnecessary packages
+echo "Removing unnecessary packages..."
+apt autoremove -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y
+verify_command $? "apt autoremove -y"
 
 # Check for git
 check_program git
 verify_command $? "git install check"
 
-echo "--- STAGE 1 Preliminary Checks Completed Successfully ---"
+# Check if a reboot is needed
+REBOOT_REQUIRED=$(ls /var/run/reboot-required 2> /dev/null)
+if [ -n "$REBOOT_REQUIRED" ]; then
+    echo "--- STAGE 1 Requires Reboot ---"
+    echo "A system reboot is required to complete updates."
+    echo "After the reboot, please run the script again using this command: sudo ./bootstrap.sh"
+    echo "Rebooting in 5 seconds..."
+    sleep 5
+    sudo reboot
+fi
+
+# Remove bootstrap.sh if we got here
+if [ -f "bootstrap.sh" ]; then
+  echo "Removing $0..."
+  rm "$0"
+fi
+
+if $UPDATES_APPLIED; then
+    echo "--- STAGE 1 Completed With Changes ---"
+    echo "Updates were applied to the system."
+else
+    echo "--- STAGE 1 Completed Without Changes ---"
+    echo "No updates were applied to the system."
+fi
 
 # Prompt for username
 read -p "$USER_NAME_PROMPT " USERNAME
@@ -107,25 +145,7 @@ if ! sudo -n true 2>/dev/null; then
     fi
 fi
 
-# Check if a reboot is needed
-REBOOT_REQUIRED=$(ls /var/run/reboot-required 2> /dev/null)
-if [ -n "$REBOOT_REQUIRED" ]; then
-    echo "--- STAGE 1 Requires Reboot ---"
-    echo "A system reboot is required to complete updates."
-    echo "After the reboot, please run the script again using this command: sudo ./bootstrap.sh"
-    echo "Rebooting in 5 seconds..."
-    sleep 5
-    sudo reboot
-else
-    echo "--- STAGE 1 Completed Successfully ---"
-fi
-
-# Remove bootstrap.sh if we got here
-if [ -f "bootstrap.sh" ]; then
-  echo "Removing $0..."
-  rm "$0"
-fi
-
+echo "Proceeding to Stage 2..."
 read -n 1 -s -r -p "Press any key to continue to Stage 2..."
 
 # --- STAGE 2: Clone the Repository ---
