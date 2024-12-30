@@ -6,7 +6,7 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Variables
-REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"  # Replace with your actual repo URL
+REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 USER_NAME_PROMPT="Please enter the desired username for n8n setup:"
 CURRENT_USER=$(whoami)
@@ -52,13 +52,6 @@ fi
 # --- STAGE 1: System Preparation ---
 echo "--- STAGE 1: System Preparation ---"
 
-# Prompt for username
-read -p "$USER_NAME_PROMPT " USERNAME
-
-if [ -z "$USERNAME" ]; then
-  echo "Username cannot be empty. Please try again."
-  exit 1
-fi
 
 # Update and Upgrade apt
 echo "Updating and Upgrading apt packages..."
@@ -70,6 +63,14 @@ check_program git
 verify_command $? "git install check"
 
 echo "--- STAGE 1 Completed Successfully ---"
+
+# Prompt for username
+read -p "$USER_NAME_PROMPT " USERNAME
+
+if [ -z "$USERNAME" ]; then
+  echo "Username cannot be empty. Please try again."
+  exit 1
+fi
 
 # Check if the user already exists
 if id -u "$USERNAME" &> /dev/null; then
@@ -127,7 +128,6 @@ else
 fi
 echo "--- STAGE 2 Completed Successfully ---"
 read -n 1 -s -r -p "Press any key to continue to Stage 3..."
-
 
 # --- STAGE 3: Configure and Deploy ---
 echo "--- STAGE 3: Configure and Deploy ---"
