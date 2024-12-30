@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verion .044
+# Verion .045
 
 set -e
 
@@ -87,7 +87,12 @@ REBOOT_REQUIRED=$(ls /var/run/reboot-required 2> /dev/null)
 if [ -n "$REBOOT_REQUIRED" ]; then
     echo "--- STAGE 1 Requires Reboot ---"
     echo "A system reboot is required to complete updates."
-    echo "After the reboot, please run the script again using this command: sudo ./bootstrap.sh"
+    if [ "$IS_ROOT" = true ]; then
+      REBOOT_CMD="./bootstrap.sh"
+    else
+      REBOOT_CMD="sudo ./bootstrap.sh"
+    fi
+    echo "After the reboot, please run the script again using this command: $REBOOT_CMD"
     echo "Rebooting in 5 seconds..."
     sleep 5
     sudo reboot
