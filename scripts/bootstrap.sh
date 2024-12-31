@@ -2,32 +2,49 @@
 # shellcheck disable=SC1091,SC2154,SC2155
 
 ###############################################################################
-# n8n Quick Setup Bootstrap Script - Full Feature (Compose .env detection)
-# Version: 0.403
+# n8n Quick Setup Bootstrap Script - Full Feature Edition
+#
+# Stages:
+#   1. System Preparation
+#   2. User Setup (root tasks)
+#   3. Fail2Ban
+#   4. UFW
+#   5. Docker
+#   6. Clone Repo
+#   7. Deploy n8n (Docker Compose)
+#
+# Includes:
+#   - Stage-based approach with skip logic, forced re-run
+#   - Logging & color-coded output
+#   - Resource checks (disk, memory, CPU, network)
+#   - OS check for Ubuntu
+#   - Example package version checks
+#   - .env handling to avoid invalid image references in Docker Compose
+#   - Rollback placeholders
 ###############################################################################
 
 set -euo pipefail
 
 ###############################################################################
-# GLOBAL CONFIG & ENV
+# GLOBAL CONFIG & ENVIRONMENT
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.403"
-STATUS_FILE="/tmp/n8n_bootstrap_status"
-LOG_FILE="/var/log/n8n_bootstrap.log"
+SCRIPT_VERSION="0.500"
 
-MIN_DISK_MB=2048
-MIN_MEM_MB=1024
-MIN_CPU_CORES=1
+# Directory to clone the repository into:
+REPO_NAME="n8n_quick_setup"
+REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 
+# Some default minimum versions
 declare -A MIN_PACKAGE_VERSIONS=(
   ["git"]="1:2.25.0"
   ["vim"]="2:8.1.2269"
 )
 
+# Stage dependency graph
 declare -A STAGE_DEPENDENCIES=(
-  ["STAGE_1"]=""
+  ["STAGE_1"]=""      # No dependencies
   ["STAGE_2"]="STAGE_1"
   ["STAGE_3"]="STAGE_2"
   ["STAGE_4"]="STAGE_3"
@@ -36,6 +53,7 @@ declare -A STAGE_DEPENDENCIES=(
   ["STAGE_7"]="STAGE_6"
 )
 
+# Rollback skeleton
 declare -A ROLLBACK_ACTIONS=(
   ["STAGE_1"]="rollback_stage_1"
   ["STAGE_2"]="rollback_stage_2"
@@ -46,11 +64,16 @@ declare -A ROLLBACK_ACTIONS=(
   ["STAGE_7"]="rollback_stage_7"
 )
 
-BOOT_USER=""
-SSH_PORT=22
-REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
-REPO_DIR="n8n_quick_setup"
+# Place for storing stage completions, user, etc.
+STATUS_FILE="/tmp/n8n_bootstrap_status"
+LOG_FILE="/var/log/n8n_bootstrap.log"
 
+# Resource thresholds
+MIN_DISK_MB=2048   # e.g. 2GB
+MIN_MEM_MB=1024    # e.g. 1GB
+MIN_CPU_CORES=1    # e.g. 1 core
+
+# Options that can be passed in
 OS_OVERRIDE=false
 DRY_RUN=false
 INTERACTIVE=false
@@ -58,45 +81,50 @@ FORCE_STAGE=""
 IS_ROOT=false
 
 ###############################################################################
-# LOGGING + COLORS
+# LOGGING & COLOR SETUP
 ###############################################################################
 if command -v tput &>/dev/null && [ -n "$(tput colors)" ] && [ "$(tput colors)" -ge 8 ]; then
   CLR_RESET="$(tput sgr0)"
   CLR_RED="$(tput setaf 1)"
   CLR_GREEN="$(tput setaf 2)"
+  CLR_BLUE="$(tput setaf 4)"
   CLR_YELLOW="$(tput setaf 3)"
 else
   CLR_RESET=""
   CLR_RED=""
   CLR_GREEN=""
+  CLR_BLUE=""
   CLR_YELLOW=""
 fi
 
 log() {
-  local ts; ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  local ts
+  ts=$(date '+%Y-%m-%d %H:%M:%S')
   echo -e "${CLR_GREEN}[LOG]${CLR_RESET} $ts $*" | tee -a "$LOG_FILE"
 }
 
 warn() {
-  local ts; ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  local ts
+  ts=$(date '+%Y-%m-%d %H:%M:%S')
   echo -e "${CLR_YELLOW}[WARN]${CLR_RESET} $ts $*" | tee -a "$LOG_FILE"
 }
 
 err() {
-  local ts; ts="$(date '+%Y-%m-%d %H:%M:%S')"
-  echo -e "${CLR_RED}[ERR]${CLR_RESET} $ts $*" | tee -a "$LOG_FILE" >&2
+  local ts
+  ts=$(date '+%Y-%m-%d %H:%M:%S')
+  echo -e "${CLR_RED}[ERR]${CLR_RESET}  $ts $*" | tee -a "$LOG_FILE" >&2
 }
 
 ###############################################################################
-# ERROR HANDLING
+# ERROR TRAP / DEBUG
 ###############################################################################
 handle_error() {
-  local exit_code=$1
-  local line_no=$2
-  local func_trace=$3
-  local last_command=$4
+  local exit_code=$?
+  local line_no=$LINENO
+  local func_trace="${FUNCNAME[*]:-}"
+  local last_cmd="$BASH_COMMAND"
 
-  err "Error on line $line_no: '$last_command' (exit: $exit_code)"
+  err "Error on line $line_no: '$last_cmd' (exit: $exit_code)"
   err "Function trace: $func_trace"
 
   if [ -f "$LOG_FILE" ]; then
@@ -105,25 +133,80 @@ handle_error() {
   fi
   exit "$exit_code"
 }
-trap 'handle_error $? $LINENO "${FUNCNAME[*]:-}" "$BASH_COMMAND"' ERR
+
+# Trap any error
+trap 'handle_error' ERR
 
 ###############################################################################
-# STAGE STATUS + ROLLBACK
+# LOG ROTATION (Optional)
+###############################################################################
+rotate_log_if_needed() {
+  if [ -f "$LOG_FILE" ]; then
+    local size
+    size=$(du -k "$LOG_FILE" | cut -f1)
+    if [ "$size" -gt 5120 ]; then  # e.g. 5MB
+      mv "$LOG_FILE" "${LOG_FILE}.old-$(date '+%Y%m%d-%H%M%S')"
+      touch "$LOG_FILE"
+      log "Log file rotated (size > 5MB)."
+    fi
+  fi
+}
+
+###############################################################################
+# STAGE STATUS HELPERS
 ###############################################################################
 mark_stage_completed() {
   echo "$1_COMPLETED" >> "$STATUS_FILE"
 }
+
 is_stage_completed() {
   grep -qx "$1_COMPLETED" "$STATUS_FILE" 2>/dev/null
 }
 
-rollback_stage_1() { warn "rollback_stage_1 => revert apt changes? (placeholder)"; }
-rollback_stage_2() { warn "rollback_stage_2 => remove created user? (placeholder)"; }
-rollback_stage_3() { warn "rollback_stage_3 => remove fail2ban? (placeholder)"; }
-rollback_stage_4() { warn "rollback_stage_4 => revert UFW rules? (placeholder)"; }
-rollback_stage_5() { warn "rollback_stage_5 => remove Docker? (placeholder)"; }
-rollback_stage_6() { warn "rollback_stage_6 => remove cloned repo? (placeholder)"; }
-rollback_stage_7() { warn "rollback_stage_7 => docker-compose down? (placeholder)"; }
+store_user_in_status() {
+  local user="$1"
+  sed -i '/^CURRENT_BOOTSTRAP_USER=/d' "$STATUS_FILE" 2>/dev/null || true
+  echo "CURRENT_BOOTSTRAP_USER=$user" >> "$STATUS_FILE"
+}
+
+read_user_from_status() {
+  grep '^CURRENT_BOOTSTRAP_USER=' "$STATUS_FILE" 2>/dev/null | cut -d= -f2 || true
+}
+
+###############################################################################
+# ROLLBACK ACTIONS
+###############################################################################
+rollback_stage_1() {
+  warn "rollback_stage_1() called. Potential revert of apt changes."
+  # For example:
+  # apt-get remove --purge -y something
+  return 0
+}
+rollback_stage_2() {
+  warn "rollback_stage_2() called. Potential user removal."
+  # e.g. userdel -r ...
+  return 0
+}
+rollback_stage_3() {
+  warn "rollback_stage_3() called. Potential revert of fail2ban."
+  return 0
+}
+rollback_stage_4() {
+  warn "rollback_stage_4() called. Potential revert of UFW."
+  return 0
+}
+rollback_stage_5() {
+  warn "rollback_stage_5() called. Potential remove Docker?"
+  return 0
+}
+rollback_stage_6() {
+  warn "rollback_stage_6() called. Potential remove the cloned repo?"
+  return 0
+}
+rollback_stage_7() {
+  warn "rollback_stage_7() called. Potential remove containers/volumes?"
+  return 0
+}
 
 stage_rollback() {
   local stage="$1"
@@ -135,40 +218,31 @@ stage_rollback() {
       return 1
     fi
   fi
-  sed -i "/^${stage}_COMPLETED$/d" "$STATUS_FILE"
+  # Remove stage completion marker
+  sed -i "/^${stage}_COMPLETED$/d" "$STATUS_FILE" 2>/dev/null || true
   return 0
 }
 
 ###############################################################################
-# READ/WRITE BOOT_USER
-###############################################################################
-store_user_in_status() {
-  local user="$1"
-  sed -i '/^CURRENT_BOOTSTRAP_USER=/d' "$STATUS_FILE" 2>/dev/null || true
-  echo "CURRENT_BOOTSTRAP_USER=$user" >> "$STATUS_FILE"
-}
-
-read_user_from_status() {
-  grep '^CURRENT_BOOTSTRAP_USER=' "$STATUS_FILE" 2>/dev/null | cut -d= -f2
-}
-
-###############################################################################
-# DEPENDENCY CHECK
+# STAGE DEPENDENCIES
 ###############################################################################
 check_stage_dependencies() {
   local stage="$1"
+  # validate the stage argument
   if [ -z "$stage" ]; then
-    err "check_stage_dependencies called w/o stage argument!"
+    err "check_stage_dependencies called without a stage argument."
     return 1
   fi
+  # ensure stage is in STAGE_DEPENDENCIES
   if ! [[ ${!STAGE_DEPENDENCIES[@]} =~ "$stage" ]]; then
-    err "Stage $stage not in STAGE_DEPENDENCIES!"
+    err "check_stage_dependencies called with an undefined stage: $stage"
     return 1
   fi
   local dep="${STAGE_DEPENDENCIES[$stage]}"
   if [ -z "$dep" ]; then
     log "Stage $stage has no dependencies."
   else
+    # If not completed, we fail
     if ! is_stage_completed "$dep"; then
       err "Stage dependency not met: $stage requires $dep"
       return 1
@@ -178,66 +252,84 @@ check_stage_dependencies() {
 }
 
 ###############################################################################
-# PACKAGE VERSION CHECK
+# RESOURCE & NETWORK CHECKS
+###############################################################################
+check_disk_space() {
+  local free_mb
+  free_mb=$(df -m / | tail -1 | awk '{print $4}')
+  if [ "$free_mb" -lt "$MIN_DISK_MB" ]; then
+    err "Insufficient disk space: $free_mb MB free (need $MIN_DISK_MB)."
+    return 1
+  fi
+  log "Disk check OK: $free_mb MB free."
+  return 0
+}
+
+check_memory() {
+  local mem_mb
+  mem_mb=$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)
+  if [ "$mem_mb" -lt "$MIN_MEM_MB" ]; then
+    err "Insufficient RAM: $mem_mb MB (need $MIN_MEM_MB)."
+    return 1
+  fi
+  log "Memory check OK: $mem_mb MB."
+  return 0
+}
+
+check_cpu() {
+  local cores
+  cores=$(nproc)
+  if [ "$cores" -lt "$MIN_CPU_CORES" ]; then
+    err "Insufficient CPU cores: $cores (need $MIN_CPU_CORES)."
+    return 1
+  fi
+  log "CPU check OK: $cores cores."
+  return 0
+}
+
+check_network() {
+  if ! ping -c 1 google.com &>/dev/null; then
+    err "No internet connectivity (ping google.com failed)."
+    return 1
+  fi
+  log "Network check OK."
+  return 0
+}
+
+###############################################################################
+# PACKAGE CHECKS
 ###############################################################################
 check_package_version() {
   local pkg="$1"
   local minv="$2"
   local installedv
   installedv="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
+
   if [ -z "$installedv" ]; then
     log "Package $pkg not installed. Installing..."
     apt-get install -y "$pkg" || return 1
     installedv="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
   fi
+
   if ! dpkg --compare-versions "$installedv" ge "$minv"; then
-    log "$pkg version $installedv < $minv, upgrading..."
+    log "$pkg version $installedv < required $minv. Upgrading..."
     apt-get install --only-upgrade -y "$pkg" || return 1
     installedv="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
   fi
+
   log "$pkg version $installedv >= $minv"
   return 0
 }
 
-###############################################################################
-# RESOURCE CHECKS
-###############################################################################
-check_disk_space() {
-  local free_mb
-  free_mb="$(df -m / | tail -1 | awk '{print $4}')"
-  if [ "$free_mb" -lt "$MIN_DISK_MB" ]; then
-    err "Disk free $free_mb MB < required $MIN_DISK_MB MB"
-    return 1
+verify_command() {
+  local code="$1"
+  local msg="$2"
+  if [ "$code" -ne 0 ]; then
+    err "Verification failed => stage: $msg"
+    exit 1
+  else
+    log "Verification passed => $msg"
   fi
-  log "Disk check OK => $free_mb MB free"
-}
-
-check_memory() {
-  local mem_mb
-  mem_mb="$(awk '/MemTotal/ {printf "%.0f", $2/1024}' /proc/meminfo)"
-  if [ "$mem_mb" -lt "$MIN_MEM_MB" ]; then
-    err "RAM $mem_mb MB < $MIN_MEM_MB MB"
-    return 1
-  fi
-  log "Memory check OK => $mem_mb MB"
-}
-
-check_cpu() {
-  local cores
-  cores="$(nproc)"
-  if [ "$cores" -lt "$MIN_CPU_CORES" ]; then
-    err "CPU cores $cores < required $MIN_CPU_CORES"
-    return 1
-  fi
-  log "CPU check OK => $cores cores"
-}
-
-check_network() {
-  if ! ping -c 1 google.com &>/dev/null; then
-    err "No network connectivity to google.com"
-    return 1
-  fi
-  log "Network check OK"
 }
 
 ###############################################################################
@@ -249,9 +341,10 @@ stage_1_system_preparation() {
   log "--- STAGE 1: System Preparation ---"
 
   if [ "$FORCE_STAGE" = "1" ]; then
-    warn "Forcing stage 1 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 1 re-run..."
+    sed -i '/^STAGE_1_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -259,52 +352,57 @@ stage_1_system_preparation() {
     return 0
   fi
 
-  check_disk_space || { stage_rollback "$STAGE"; return 1; }
-  check_memory     || { stage_rollback "$STAGE"; return 1; }
-  check_cpu        || { stage_rollback "$STAGE"; return 1; }
-  check_network    || { stage_rollback "$STAGE"; return 1; }
-
-  # Docker might not be installed => just warn
-  if ! command -v docker &>/dev/null; then
-    warn "Docker not installed => skipping Docker health check."
+  # Resource checks
+  if ! $DRY_RUN; then
+    check_disk_space || { stage_rollback "$STAGE"; return 1; }
+    check_memory || { stage_rollback "$STAGE"; return 1; }
+    check_cpu || { stage_rollback "$STAGE"; return 1; }
+    check_network || { stage_rollback "$STAGE"; return 1; }
   else
-    if ! docker ps &>/dev/null; then
-      warn "Docker daemon not running? systemctl start docker?"
-    fi
+    log "Dry run => skipping resource checks"
   fi
 
   # OS check
   if ! $OS_OVERRIDE; then
-    local os_id; os_id="$(. /etc/os-release; echo "$ID")"
+    local os_id
+    os_id="$(. /etc/os-release; echo "$ID")"
     if [ "$os_id" != "ubuntu" ]; then
-      err "Detected OS=$os_id, only 'ubuntu' supported. Use --override-os to skip."
+      err "Detected OS=$os_id, only 'ubuntu' is supported. (--override-os to skip)"
       stage_rollback "$STAGE"
       return 1
     fi
     log "OS check => ubuntu confirmed."
   else
-    warn "OS override => skipping OS checks"
+    warn "OS override => skipping OS checks."
   fi
 
   if ! $DRY_RUN; then
-    apt-get update || true
-    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || true
-    apt-get autoremove -y || true
+    apt-get update || verify_command $? "apt update"
+    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || verify_command $? "apt upgrade"
+    apt-get autoremove -y || verify_command $? "apt autoremove"
 
+    # Minimum package version checks
     for pkg in "${!MIN_PACKAGE_VERSIONS[@]}"; do
-      check_package_version "$pkg" "${MIN_PACKAGE_VERSIONS[$pkg]}" || warn "Could not meet $pkg version requirement"
+      check_package_version "$pkg" "${MIN_PACKAGE_VERSIONS[$pkg]}" || warn "Could not upgrade $pkg"
     done
+
+    # Check if reboot is required
+    if [ -f /var/run/reboot-required ]; then
+      log "Reboot required. Re-run script after reboot."
+      sleep 3
+      reboot
+    fi
   else
-    log "Dry-run => skipping apt tasks"
+    log "Dry run => skipping apt tasks"
   fi
 
   mark_stage_completed "$STAGE"
-  log "--- STAGE 1 Completed ---"
+  log "Stage 1 completed!"
   return 0
 }
 
 ###############################################################################
-# STAGE 2: User Setup + SSH Hardening
+# STAGE 2: User Setup (root tasks)
 ###############################################################################
 stage_2_user_setup() {
   local STAGE="STAGE_2"
@@ -312,77 +410,77 @@ stage_2_user_setup() {
   log "--- STAGE 2: User Setup (root tasks) ---"
 
   if [ "$FORCE_STAGE" = "2" ]; then
-    warn "Forcing stage 2 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 2 re-run..."
+    sed -i '/^STAGE_2_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
     log "Stage 2 completed, skipping..."
-    # Attempt to read user from status if not loaded
-    if [ -z "$BOOT_USER" ]; then
-      BOOT_USER="$(read_user_from_status || true)"
-      if [ -n "$BOOT_USER" ]; then
-        log "Recovered BOOT_USER=$BOOT_USER from status."
-      else
-        warn "BOOT_USER not found in status, future stages may fail if they need it."
-      fi
-    fi
     return 0
   fi
 
+  # Prompt for username
+  local USERNAME
   if $INTERACTIVE; then
-    read -rp "Please enter the desired username for n8n setup: " BOOT_USER
-    read -rp "SSH port? [22]: " TMP_PORT
-    if [ -n "$TMP_PORT" ]; then
-      SSH_PORT="$TMP_PORT"
-    fi
+    read -rp "Please enter the desired username for n8n setup: " USERNAME
   else
-    [ -z "$BOOT_USER" ] && BOOT_USER="david"
-    [ -z "$SSH_PORT" ] && SSH_PORT="22"
-    log "Non-interactive => Using BOOT_USER=$BOOT_USER, SSH_PORT=$SSH_PORT"
+    USERNAME="david"
+    log "Non-interactive: defaulting to username=$USERNAME"
   fi
 
-  if [[ ! "$BOOT_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
-    err "Invalid username => '$BOOT_USER'"
+  # Validate username
+  if [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    err "Invalid username => $USERNAME"
     stage_rollback "$STAGE"
     return 1
   fi
 
-  if ! id -u "$BOOT_USER" &>/dev/null; then
+  if id -u "$USERNAME" &>/dev/null; then
+    log "User $USERNAME already exists."
+  else
     if ! $DRY_RUN; then
-      adduser "$BOOT_USER"
-      usermod -aG sudo "$BOOT_USER"
+      log "Creating user => $USERNAME"
+      adduser "$USERNAME" || { stage_rollback "$STAGE"; return 1; }
+      usermod -aG sudo "$USERNAME" || { stage_rollback "$STAGE"; return 1; }
+      log "User $USERNAME created + sudo group."
     else
-      log "Dry-run => skip user creation"
+      log "Dry run => would create user: $USERNAME"
     fi
-  else
-    warn "User $BOOT_USER already exists, continuing..."
   fi
 
-  # SSH Hardening
+  store_user_in_status "$USERNAME"
+
+  # Lock down /home/$USERNAME
   if ! $DRY_RUN; then
-    mkdir -p "/home/$BOOT_USER/.ssh"
-    chmod 700 "/home/$BOOT_USER/.ssh"
-    if [ -f ~/.ssh/authorized_keys ]; then
-      cp ~/.ssh/authorized_keys "/home/$BOOT_USER/.ssh/authorized_keys" || true
-    fi
-    chown -R "$BOOT_USER:$BOOT_USER" "/home/$BOOT_USER/.ssh"
-
-    sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config
-    sed -i "s/PermitRootLogin yes/PermitRootLogin no/" /etc/ssh/sshd_config
-    sed -i "s/#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
-
-    systemctl restart ssh
-    log "User $BOOT_USER created + SSH locked down. SSH port => $SSH_PORT"
+    chmod 711 "/home/$USERNAME" || { stage_rollback "$STAGE"; return 1; }
   else
-    log "Dry-run => skip SSH config changes"
+    log "Dry run => skip chmod /home/$USERNAME"
   fi
 
-  store_user_in_status "$BOOT_USER"
+  # Sudo check
+  if ! sudo -n true 2>/dev/null; then
+    warn "sudo -n true fails, adding $USERNAME to sudo again?"
+    usermod -aG sudo "$USERNAME" || true
+  fi
+
+  # Optional: set a system-wide vim colorscheme
+  if ! $DRY_RUN; then
+    log "Setting default vim colorscheme => desert"
+    {
+      echo "set background=dark"
+      echo "colorscheme desert"
+    } | tee /etc/vim/vimrc.local >/dev/null || true
+
+    log "Setting user .vimrc => desert"
+    echo "colorscheme desert" | sudo -u "$USERNAME" tee "/home/$USERNAME/.vimrc" >/dev/null
+  else
+    log "Dry run => skip vimrc changes"
+  fi
 
   mark_stage_completed "$STAGE"
-  log "--- STAGE 2 Completed ---"
+  log "Stage 2 completed!"
   return 0
 }
 
@@ -395,9 +493,10 @@ stage_3_fail2ban() {
   log "--- STAGE 3: Fail2Ban Install/Config ---"
 
   if [ "$FORCE_STAGE" = "3" ]; then
-    warn "Forcing stage 3 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 3 re-run..."
+    sed -i '/^STAGE_3_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -407,8 +506,9 @@ stage_3_fail2ban() {
 
   if ! $DRY_RUN; then
     log "Installing Fail2Ban..."
-    apt update && apt install -y fail2ban
+    apt-get update && apt-get install -y fail2ban
 
+    # Basic config
     cat <<EOF >/etc/fail2ban/jail.local
 [DEFAULT]
 ignoreip = 127.0.0.1/8
@@ -423,20 +523,19 @@ port = ssh
 logpath = /var/log/auth.log
 maxretry = 3
 EOF
-
     systemctl restart fail2ban
-    log "Fail2Ban installed + basic config added."
+    log "Fail2Ban installed & configured."
   else
-    log "Dry-run => skipping fail2ban install/config"
+    log "Dry run => skip fail2ban"
   fi
 
   mark_stage_completed "$STAGE"
-  log "--- STAGE 3 Completed ---"
+  log "Stage 3 completed!"
   return 0
 }
 
 ###############################################################################
-# STAGE 4: UFW
+# STAGE 4: UFW Setup
 ###############################################################################
 stage_4_ufw() {
   local STAGE="STAGE_4"
@@ -444,9 +543,10 @@ stage_4_ufw() {
   log "--- STAGE 4: UFW Setup ---"
 
   if [ "$FORCE_STAGE" = "4" ]; then
-    warn "Forcing stage 4 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 4 re-run..."
+    sed -i '/^STAGE_4_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -456,29 +556,24 @@ stage_4_ufw() {
 
   if ! $DRY_RUN; then
     log "Configuring UFW..."
-    apt install -y ufw
+    apt-get install -y ufw
     ufw allow OpenSSH
     ufw allow 80/tcp
     ufw allow 443/tcp
-
-    if [ "$SSH_PORT" != "22" ]; then
-      ufw allow "$SSH_PORT/tcp"
-    fi
-
     ufw --force enable
     ufw status verbose
     log "UFW configured + enabled."
   else
-    log "Dry-run => skipping UFW tasks"
+    log "Dry run => skip UFW"
   fi
 
   mark_stage_completed "$STAGE"
-  log "--- STAGE 4 Completed ---"
+  log "Stage 4 completed!"
   return 0
 }
 
 ###############################################################################
-# STAGE 5: Docker
+# STAGE 5: Docker Setup
 ###############################################################################
 stage_5_docker() {
   local STAGE="STAGE_5"
@@ -486,9 +581,10 @@ stage_5_docker() {
   log "--- STAGE 5: Docker Setup ---"
 
   if [ "$FORCE_STAGE" = "5" ]; then
-    warn "Forcing stage 5 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 5 re-run..."
+    sed -i '/^STAGE_5_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -496,48 +592,46 @@ stage_5_docker() {
     return 0
   fi
 
-  if [ -z "$BOOT_USER" ]; then
-    BOOT_USER="$(read_user_from_status || true)"
-    if [ -z "$BOOT_USER" ]; then
+  if ! $DRY_RUN; then
+    log "Installing Docker + Compose..."
+    apt-get update
+    apt-get install -y docker.io docker-compose
+
+    local boot_user
+    boot_user="$(read_user_from_status)"
+    if [ -z "$boot_user" ]; then
       err "BOOT_USER not set => Stage 2 incomplete?"
       stage_rollback "$STAGE"
       return 1
-    else
-      log "Recovered BOOT_USER=$BOOT_USER from status for Docker group."
     fi
-  fi
 
-  if ! $DRY_RUN; then
-    log "Installing Docker + Compose..."
-    apt update && apt install -y docker.io docker-compose
-
-    usermod -aG docker "$BOOT_USER"
+    usermod -aG docker "$boot_user" || true
     systemctl enable docker
-    systemctl start docker
 
-    log "Docker + Docker Compose installed. $BOOT_USER => docker group."
+    log "Docker + Docker Compose installed. $boot_user => docker group."
     log "User must log out/in for group membership to take effect."
   else
-    log "Dry-run => skipping Docker tasks"
+    log "Dry run => skip Docker"
   fi
 
   mark_stage_completed "$STAGE"
-  log "--- STAGE 5 Completed ---"
+  log "Stage 5 completed!"
   return 0
 }
 
 ###############################################################################
-# STAGE 6: Clone the Repository
+# STAGE 6: Clone the n8n_quick_setup Repository
 ###############################################################################
-stage_6_clone() {
+stage_6_clone_repository() {
   local STAGE="STAGE_6"
   log ""
   log "--- STAGE 6: Clone the Repository ---"
 
   if [ "$FORCE_STAGE" = "6" ]; then
-    warn "Forcing stage 6 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 6 re-run..."
+    sed -i '/^STAGE_6_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -545,145 +639,120 @@ stage_6_clone() {
     return 0
   fi
 
-  if [ -z "$BOOT_USER" ]; then
-    BOOT_USER="$(read_user_from_status || true)"
-    if [ -z "$BOOT_USER" ]; then
-      err "No user found => stage2 incomplete?"
-      stage_rollback "$STAGE"
-      return 1
-    fi
-  fi
-
-  local home_dir="/home/$BOOT_USER"
-  if [ ! -d "$home_dir" ]; then
-    err "Missing home dir => $home_dir. Stage 2 incomplete?"
+  local boot_user
+  boot_user="$(read_user_from_status)"
+  if [ -z "$boot_user" ]; then
+    err "No user => stage 2 incomplete?"
     stage_rollback "$STAGE"
     return 1
   fi
 
+  local REPO_PATH="/home/$boot_user/$REPO_NAME"
+
   if ! $DRY_RUN; then
-    if [ -d "$home_dir/$REPO_DIR" ]; then
-      log "Repo directory exists => $home_dir/$REPO_DIR; adjusting perms..."
-      chown -R "$BOOT_USER:$BOOT_USER" "$home_dir/$REPO_DIR"
-      chmod -R u+rwx "$home_dir/$REPO_DIR"
+    if [ -d "$REPO_PATH" ]; then
+      log "Repo directory exists => $REPO_PATH; adjusting perms..."
+      chown -R "$boot_user":"$boot_user" "$REPO_PATH"
+      chmod -R u+rwx "$REPO_PATH" || { stage_rollback "$STAGE"; return 1; }
     else
-      sudo -u "$BOOT_USER" git clone "$REPO_URL" "$home_dir/$REPO_DIR"
-      chown -R "$BOOT_USER:$BOOT_USER" "$home_dir/$REPO_DIR"
-      chmod -R u+rwx "$home_dir/$REPO_DIR"
+      log "Cloning repo => $REPO_PATH"
+      sudo -u "$boot_user" git clone "$REPO_URL" "$REPO_PATH"
+      chown -R "$boot_user":"$boot_user" "$REPO_PATH"
+      chmod -R u+rwx "$REPO_PATH"
     fi
-
-    # Check if there's a config/.env.example => rename/copy to config/.env if missing
-    if [ -f "$home_dir/$REPO_DIR/config/.env.example" ]; then
-      if [ ! -f "$home_dir/$REPO_DIR/config/.env" ]; then
-        log "Creating config/.env from .env.example"
-        cp "$home_dir/$REPO_DIR/config/.env.example" "$home_dir/$REPO_DIR/config/.env"
-        chown "$BOOT_USER:$BOOT_USER" "$home_dir/$REPO_DIR/config/.env"
-      fi
-    else
-      warn "No .env.example found in config/ => environment variables might be empty!"
-    fi
-
   else
-    log "Dry-run => skip cloning repository"
+    log "Dry run => skip clone"
   fi
 
   mark_stage_completed "$STAGE"
-  log "--- STAGE 6 Completed ---"
+  log "Stage 6 completed!"
   return 0
 }
 
 ###############################################################################
-# STAGE 7: Deploy n8n + Docker Compose
+# STAGE 7: Deploy n8n (Docker Compose)
 ###############################################################################
-stage_7_deploy() {
+stage_7_deploy_n8n() {
   local STAGE="STAGE_7"
   log ""
   log "--- STAGE 7: Deploy n8n + Docker Compose ---"
 
   if [ "$FORCE_STAGE" = "7" ]; then
-    warn "Forcing stage 7 re-run..."
-    sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
+    warn "Forcing STAGE 7 re-run..."
+    sed -i '/^STAGE_7_COMPLETED$/d' "$STATUS_FILE" || true
   fi
+
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
     log "Stage 7 done. Skipping..."
-    log "All stages completed!"
     return 0
   fi
 
-  if [ -z "$BOOT_USER" ]; then
-    BOOT_USER="$(read_user_from_status || true)"
-    if [ -z "$BOOT_USER" ]; then
-      err "No user found => stage2 incomplete?"
-      stage_rollback "$STAGE"
-      return 1
-    fi
-  fi
-
-  local home_dir="/home/$BOOT_USER"
-  if [ ! -d "$home_dir/$REPO_DIR" ]; then
-    err "Repo not found => $home_dir/$REPO_DIR. Stage 6 incomplete?"
+  local boot_user
+  boot_user="$(read_user_from_status)"
+  if [ -z "$boot_user" ]; then
+    err "No user => stage2 incomplete?"
     stage_rollback "$STAGE"
     return 1
   fi
 
-  if ! $DRY_RUN; then
-    sudo -u "$BOOT_USER" bash <<EOF
-set -e
-cd "$home_dir/$REPO_DIR"
+  local REPO_PATH="/home/$boot_user/$REPO_NAME"
+  local CONFIG_PATH="$REPO_PATH/config"
 
-echo "[LOG] Creating Docker volumes..."
-docker volume create caddy_data
-docker volume create n8n_data
-
-echo "[LOG] Starting Docker Compose (docker-compose.yml in config/)..."
-
-# We'll specify --env-file explicitly if config/.env is present
-if [ -f "config/.env" ]; then
-  ENV_FLAG="--env-file config/.env"
-else
-  ENV_FLAG=""
-fi
-
-# Compose v2 or classic docker-compose?
-if docker compose version &>/dev/null; then
-  docker compose \$ENV_FLAG -f config/docker-compose.yml up -d
-elif command -v docker-compose &>/dev/null; then
-  docker-compose \$ENV_FLAG -f config/docker-compose.yml up -d
-else
-  echo "[ERR] No docker-compose or 'docker compose' found!"
-  exit 1
-fi
-
-echo "[LOG] n8n + Caddy deployed successfully."
-EOF
-  else
-    log "Dry-run => skip docker compose up -d"
+  if [ ! -d "$CONFIG_PATH" ]; then
+    err "No config/ directory at $CONFIG_PATH => clone step incomplete?"
+    stage_rollback "$STAGE"
+    return 1
   fi
 
+  # Optionally create .env from .env.example if missing
+  if [ ! -f "$CONFIG_PATH/.env" ]; then
+    log "Copying .env.example -> .env"
+    cp "$CONFIG_PATH/.env.example" "$CONFIG_PATH/.env"
+    # Optionally sed out placeholders:
+    # sed -i "s|n8n.yourdomain.com|$some_domain|" "$CONFIG_PATH/.env"
+  fi
+
+  log "Creating Docker volumes..."
+  docker volume create caddy_data || true
+  docker volume create n8n_data || true
+  docker volume create n8n_postgres_data || true
+
+  log "Starting Docker Compose (docker-compose.yml in config/)..."
+  # We cd into config so it picks up .env automatically:
+  sudo -u "$boot_user" bash <<EOF
+    set -e
+    cd "$CONFIG_PATH"
+    docker compose -f docker-compose.yml up -d
+EOF
+  verify_command $? "Docker Compose up"
+
   mark_stage_completed "$STAGE"
-  log "--- STAGE 7 Completed ---"
-  log "All stages completed!"
+  log "Stage 7 Completed!"
   return 0
 }
 
 ###############################################################################
-# MAIN
+# MAIN EXECUTION
 ###############################################################################
 usage() {
   cat <<EOF
 Usage: $0 [OPTIONS]
 
 Options:
-  --override-os       Skip OS checks (dangerous).
-  --force-stageX      Re-run a specific stage X (1..7).
-  --dry-run           Simulate actions, no changes.
-  --interactive       Prompt user for config (username/port).
-  --help, -h          Show usage
+  --override-os         Skip OS checks
+  --force-stageX        Force re-run of stage X (1..7)
+  --dry-run             Simulate actions
+  --interactive         Prompt for user input
+  --help, -h            Show this usage info
 EOF
 }
 
+rotate_log_if_needed
+log "=== n8n Quick Setup Bootstrap v$SCRIPT_VERSION START ==="
+
+# Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --override-os)
@@ -709,12 +778,16 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+touch "$STATUS_FILE"
+touch "$LOG_FILE"
+
+# Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
   if ! sudo -n true 2>/dev/null; then
-    err "Script requires root or passwordless sudo. Rerun with sudo."
+    err "Needs root/sudo privileges. Re-run with sudo."
     exit 1
   else
-    log "Running as non-root user with sudo privileges..."
+    log "Running as non-root user w/ sudo..."
     IS_ROOT=false
   fi
 else
@@ -722,16 +795,13 @@ else
   IS_ROOT=true
 fi
 
-touch "$STATUS_FILE" "$LOG_FILE"
-log "=== n8n Quick Setup Bootstrap v$SCRIPT_VERSION START ==="
-
+# Execute stages in order
 stage_1_system_preparation
 stage_2_user_setup
 stage_3_fail2ban
 stage_4_ufw
 stage_5_docker
-stage_6_clone
-stage_7_deploy
+stage_6_clone_repository
+stage_7_deploy_n8n
 
-log "=== n8n Quick Setup Bootstrap COMPLETE ==="
-exit 0
+log "All stages completed!"
