@@ -3,10 +3,7 @@
 
 ###############################################################################
 # n8n Quick Setup Bootstrap Script - Full Feature Edition (Enhanced)
-# Version: 0.132
-#
-# - Updated to make the Docker check non-fatal if Docker is not installed.
-# - Keeps the unbound variable fix for STAGE_DEPENDENCIES.
+# Version: 0.133
 ###############################################################################
 
 set -euo pipefail
@@ -16,7 +13,7 @@ set -euo pipefail
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.132"
+SCRIPT_VERSION="0.133"
 
 # Default configs (env-overridable)
 REPO_URL="${REPO_URL:-https://github.com/DavidMcCauley/n8n_quick_setup.git}"
@@ -31,24 +28,22 @@ MIN_DISK_MB="${MIN_DISK_MB:-2048}"     # Require at least 2GB free
 MIN_MEM_MB="${MIN_MEM_MB:-1024}"       # Require at least 1GB of RAM
 MIN_CPU_CORES="${MIN_CPU_CORES:-1}"    # Require at least 1 CPU core
 
-# Minimum package versions (add or adjust as needed)
+# Minimum package versions
 declare -A MIN_PACKAGE_VERSIONS=(
   ["git"]="${GIT_MIN_VERSION:-1:2.25.0}"
   ["vim"]="${VIM_MIN_VERSION:-2:8.1.2269}"
-  # Example: ["docker"]="5:20.10.0"
+  # ["docker"]="5:20.10.0" # Example if you require Docker at a certain version
 )
 
-# -----------------------------------------------------------------------------
 # Stage dependency graph
-# -----------------------------------------------------------------------------
 declare -A STAGE_DEPENDENCIES=(
-  ["STAGE_1"]=""      # STAGE_1 has no dependencies
+  ["STAGE_1"]=""      # Stage 1 has no dependency
   ["STAGE_2"]="STAGE_1"
   ["STAGE_3"]="STAGE_2"
   ["STAGE_4"]="STAGE_3"
 )
 
-# Rollback skeleton (customizable)
+# Rollback skeleton
 declare -A ROLLBACK_ACTIONS=(
   ["STAGE_1"]="rollback_stage_1"
   ["STAGE_2"]="rollback_stage_2"
@@ -56,7 +51,6 @@ declare -A ROLLBACK_ACTIONS=(
   ["STAGE_4"]="rollback_stage_4"
 )
 
-# Optional progress tracking
 declare -A STAGE_PROGRESS
 
 OS_OVERRIDE=false
@@ -185,8 +179,7 @@ read_user_from_status() {
 ###############################################################################
 rollback_stage_1() {
   warn "rollback_stage_1() called. Potential revert of apt changes."
-  # Example: remove installed packages, restore configs, etc.
-  # apt-get remove --purge -y <packages> || true
+  # e.g. apt-get remove --purge -y <some packages>
   return 0
 }
 
@@ -213,7 +206,7 @@ rollback_stage_3() {
 
 rollback_stage_4() {
   warn "rollback_stage_4() called. Potential cleanup of containers."
-  # Example: docker rm -f some_container || true
+  # e.g. docker rm -f container_name
   return 0
 }
 
@@ -228,33 +221,28 @@ stage_rollback() {
       return 1
     fi
   fi
-
   sed -i "/^${stage}_COMPLETED$/d" "$STATUS_FILE"
   return 0
 }
 
 ###############################################################################
-# STAGE DEPENDENCIES (FIXED + DEFENSIVE)
+# STAGE DEPENDENCIES
 ###############################################################################
 check_stage_dependencies() {
   local stage="$1"
 
-  # 1. Validate that a stage argument was provided:
   if [ -z "$stage" ]; then
     err "check_stage_dependencies called without a stage argument."
     return 1
   fi
 
-  # 2. Ensure $stage is defined in STAGE_DEPENDENCIES:
+  # Ensure the stage key exists in STAGE_DEPENDENCIES
   if [ -z "${STAGE_DEPENDENCIES[$stage]+_}" ]; then
     err "check_stage_dependencies called with an undefined stage: $stage"
     return 1
   fi
 
-  # 3. Grab the dependency
   local dep="${STAGE_DEPENDENCIES[$stage]}"
-
-  # 4. If dep is empty, no dependencies. Otherwise check if the dep is completed.
   if [ -z "$dep" ]; then
     log "Stage $stage has no dependencies."
   elif ! is_stage_completed "${dep}_COMPLETED"; then
@@ -310,18 +298,13 @@ check_network() {
   return 0
 }
 
-# -----------------------------------------------------------------------------
-# Make Docker check optional: 
-#   - If Docker is absent, warn & pass. 
-#   - If Docker is installed but daemon is not running, error.
-# -----------------------------------------------------------------------------
+# Docker check is optional:
 check_docker_health() {
   if ! command -v docker &>/dev/null; then
     warn "Docker not installed or not in PATH. Skipping Docker check."
     return 0
   fi
 
-  # Docker command is found, but let's see if daemon is running:
   if ! docker ps &>/dev/null; then
     err "Docker daemon found but not running."
     return 1
@@ -336,8 +319,6 @@ check_service_status() {
   if command -v systemctl &>/dev/null; then
     if ! systemctl is-active --quiet "$service"; then
       warn "Service $service is not active."
-      # Return 1 if you want this to be fatal:
-      # return 1
       return 0
     fi
     log "Service $service is active."
@@ -400,7 +381,7 @@ stage_1_system_preparation() {
   log "--- STAGE 1: System Preparation ---"
 
   if [ "$FORCE_STAGE" = "1" ]; then
-    warn "Forcing STAGE 1 re-run..."
+    warn "Forcing STAGE_1 re-run..."
     sed -i '/^STAGE_1_COMPLETED$/d' "$STATUS_FILE" || true
   fi
 
@@ -510,7 +491,6 @@ stage_2_user_setup() {
   if $INTERACTIVE; then
     read -rp "$USER_NAME_PROMPT " username
   else
-    # Just read once; can adapt to your needs if fully non-interactive
     read -rp "$USER_NAME_PROMPT " username
   fi
 
@@ -558,6 +538,7 @@ stage_2_user_setup() {
   log "After chmod =>"
   ls -ld "/home/$username" || true
 
+  # Double-check that sudo works for this user (optional).
   if ! sudo -n true 2>/dev/null; then
     err "sudo -n true fails, adding $username to sudo again?"
     if ! $DRY_RUN; then
@@ -687,29 +668,30 @@ stage_4_configure_and_deploy() {
   log "Switching to $boot_user for final script calls..."
 
   if ! $DRY_RUN; then
-    sudo -u "$boot_user" bash << 'EOS'
+    # IMPORTANT: Use an absolute path in 'cd':
+    sudo -u "$boot_user" bash <<EOS
       set -e
 
       verify_command() {
-        if [ "$1" -ne 0 ]; then
-          echo "[ERR] Verification failed => stage: $2"
+        if [ "\$1" -ne 0 ]; then
+          echo "[ERR] Verification failed => stage: \$2"
           exit 1
         else
-          echo "[LOG] Verification passed => $2"
+          echo "[LOG] Verification passed => \$2"
         fi
       }
 
-      echo "[LOG] cd => n8n_quick_setup"
-      cd "n8n_quick_setup"
+      echo "[LOG] cd => /home/$boot_user/$REPO_DIR"
+      cd "/home/$boot_user/$REPO_DIR"
 
       echo "[LOG] chmod +x scripts/*.sh"
-      chmod +x scripts/*.sh || verify_command $? "chmod scripts"
+      chmod +x scripts/*.sh || verify_command \$? "chmod scripts"
 
       echo "[LOG] Running final setup scripts..."
-      ./scripts/setup-user.sh "$USER" || verify_command $? "setup-user"
-      ./scripts/setup-fail2ban.sh || verify_command $? "setup-fail2ban"
-      ./scripts/setup-ufw.sh || verify_command $? "setup-ufw"
-      ./scripts/setup-docker.sh "$USER" || verify_command $? "setup-docker"
+      ./scripts/setup-user.sh "\$USER" || verify_command \$? "setup-user"
+      ./scripts/setup-fail2ban.sh       || verify_command \$? "setup-fail2ban"
+      ./scripts/setup-ufw.sh            || verify_command \$? "setup-ufw"
+      ./scripts/setup-docker.sh "\$USER"|| verify_command \$? "setup-docker"
 
       echo "[LOG] Stage4 => Deployment done. Check README next."
 EOS
