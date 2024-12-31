@@ -2,8 +2,8 @@
 # shellcheck disable=SC1091,SC2154,SC2155
 
 ###############################################################################
-# n8n Quick Setup Bootstrap Script - Full Feature
-# Version: 0.401
+# n8n Quick Setup Bootstrap Script - Full Feature (Compose Detection)
+# Version: 0.402
 ###############################################################################
 
 set -euo pipefail
@@ -13,7 +13,7 @@ set -euo pipefail
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.401"
+SCRIPT_VERSION="0.402"
 STATUS_FILE="/tmp/n8n_bootstrap_status"
 LOG_FILE="/var/log/n8n_bootstrap.log"
 
@@ -26,7 +26,6 @@ declare -A MIN_PACKAGE_VERSIONS=(
   ["vim"]="2:8.1.2269"
 )
 
-# Stage Dependencies
 declare -A STAGE_DEPENDENCIES=(
   ["STAGE_1"]=""
   ["STAGE_2"]="STAGE_1"
@@ -37,7 +36,6 @@ declare -A STAGE_DEPENDENCIES=(
   ["STAGE_7"]="STAGE_6"
 )
 
-# Rollback placeholders
 declare -A ROLLBACK_ACTIONS=(
   ["STAGE_1"]="rollback_stage_1"
   ["STAGE_2"]="rollback_stage_2"
@@ -48,11 +46,8 @@ declare -A ROLLBACK_ACTIONS=(
   ["STAGE_7"]="rollback_stage_7"
 )
 
-# ### CHANGED OR ADDED
-# We'll store the BOOT_USER inside the status file, so future runs still know who was created.
 BOOT_USER=""
 SSH_PORT=22
-
 REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 
@@ -149,15 +144,11 @@ stage_rollback() {
 ###############################################################################
 store_user_in_status() {
   local user="$1"
-  # Remove any existing line referencing CURRENT_BOOTSTRAP_USER
   sed -i '/^CURRENT_BOOTSTRAP_USER=/d' "$STATUS_FILE" 2>/dev/null || true
   echo "CURRENT_BOOTSTRAP_USER=$user" >> "$STATUS_FILE"
 }
 
 read_user_from_status() {
-  # If the file has a line like:
-  #   CURRENT_BOOTSTRAP_USER=david
-  # we parse it
   grep '^CURRENT_BOOTSTRAP_USER=' "$STATUS_FILE" 2>/dev/null | cut -d= -f2
 }
 
@@ -250,6 +241,23 @@ check_network() {
 }
 
 ###############################################################################
+# COMPOSE HELPER - auto-detect docker compose vs. docker-compose
+###############################################################################
+run_compose_up() {
+  local compose_file="$1"
+  # 1) Try the "docker compose" plugin command
+  if docker compose version &>/dev/null; then
+    docker compose -f "$compose_file" up -d
+  # 2) Otherwise fallback to the older "docker-compose"
+  elif command -v docker-compose &>/dev/null; then
+    docker-compose -f "$compose_file" up -d
+  else
+    err "No docker-compose or 'docker compose' plugin found. Please install Docker Compose."
+    return 1
+  fi
+}
+
+###############################################################################
 # STAGE 1: System Preparation
 ###############################################################################
 stage_1_system_preparation() {
@@ -330,20 +338,18 @@ stage_2_user_setup() {
 
   if is_stage_completed "$STAGE"; then
     log "Stage 2 completed, skipping..."
-    # ### CHANGED OR ADDED
-    # Possibly read user from status if not in memory
+    # Attempt to read user from status if not loaded
     if [ -z "$BOOT_USER" ]; then
       BOOT_USER="$(read_user_from_status || true)"
       if [ -n "$BOOT_USER" ]; then
         log "Recovered BOOT_USER=$BOOT_USER from status."
       else
-        warn "BOOT_USER not found in status, Stage 5 might fail if it needs it."
+        warn "BOOT_USER not found in status, future stages may fail if they need it."
       fi
     fi
     return 0
   fi
 
-  # Ask or default
   if $INTERACTIVE; then
     read -rp "Please enter the desired username for n8n setup: " BOOT_USER
     read -rp "SSH port? [22]: " TMP_PORT
@@ -356,14 +362,12 @@ stage_2_user_setup() {
     log "Non-interactive => Using BOOT_USER=$BOOT_USER, SSH_PORT=$SSH_PORT"
   fi
 
-  # Validate user
   if [[ ! "$BOOT_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
     err "Invalid username => '$BOOT_USER'"
     stage_rollback "$STAGE"
     return 1
   fi
 
-  # Create user if missing
   if ! id -u "$BOOT_USER" &>/dev/null; then
     if ! $DRY_RUN; then
       adduser "$BOOT_USER"
@@ -394,7 +398,6 @@ stage_2_user_setup() {
     log "Dry-run => skip SSH config changes"
   fi
 
-  # ### CHANGED OR ADDED
   store_user_in_status "$BOOT_USER"
 
   mark_stage_completed "$STAGE"
@@ -515,8 +518,6 @@ stage_5_docker() {
     return 0
   fi
 
-  # ### CHANGED OR ADDED
-  # If BOOT_USER was lost (script re-run?), read from status
   if [ -z "$BOOT_USER" ]; then
     BOOT_USER="$(read_user_from_status || true)"
     if [ -z "$BOOT_USER" ]; then
@@ -567,7 +568,6 @@ stage_6_clone() {
     return 0
   fi
 
-  # ### CHANGED OR ADDED
   if [ -z "$BOOT_USER" ]; then
     BOOT_USER="$(read_user_from_status || true)"
     if [ -z "$BOOT_USER" ]; then
@@ -650,7 +650,23 @@ docker volume create caddy_data
 docker volume create n8n_data
 
 echo "[LOG] Starting Docker Compose (docker-compose.yml in config/)..."
-docker compose -f config/docker-compose.yml up -d
+# <-- Use the run_compose_up function from within a sub-shell:
+# We can't call the shell function directly inside HEREDOC,
+# so we either replicate it or just do "docker-compose" directly.
+
+# Instead, let's do the "classic" approach: 
+#   docker-compose -f config/docker-compose.yml up -d
+# or "docker compose -f ... up -d"
+# We'll do a quick check here, or replicate run_compose_up logic:
+
+if docker compose version &>/dev/null; then
+  docker compose -f config/docker-compose.yml up -d
+elif command -v docker-compose &>/dev/null; then
+  docker-compose -f config/docker-compose.yml up -d
+else
+  echo "[ERR] No docker-compose or 'docker compose' found!"
+  exit 1
+fi
 
 echo "[LOG] n8n + Caddy deployed successfully."
 EOF
@@ -721,7 +737,6 @@ fi
 touch "$STATUS_FILE" "$LOG_FILE"
 log "=== n8n Quick Setup Bootstrap v$SCRIPT_VERSION START ==="
 
-# RUN STAGES
 stage_1_system_preparation
 stage_2_user_setup
 stage_3_fail2ban
