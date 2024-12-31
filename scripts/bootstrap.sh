@@ -3,11 +3,10 @@
 
 ###############################################################################
 # n8n Quick Setup Bootstrap Script - Full Feature Edition (Enhanced)
-# Version: 0.131
+# Version: 0.132
 #
-# Changelog vs 0.130:
-#   1. Fixed unbound variable error in STAGE_DEPENDENCIES for STAGE_1.
-#   2. Added defensive checks in check_stage_dependencies().
+# - Updated to make the Docker check non-fatal if Docker is not installed.
+# - Keeps the unbound variable fix for STAGE_DEPENDENCIES.
 ###############################################################################
 
 set -euo pipefail
@@ -17,7 +16,7 @@ set -euo pipefail
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.131"
+SCRIPT_VERSION="0.132"
 
 # Default configs (env-overridable)
 REPO_URL="${REPO_URL:-https://github.com/DavidMcCauley/n8n_quick_setup.git}"
@@ -41,7 +40,6 @@ declare -A MIN_PACKAGE_VERSIONS=(
 
 # -----------------------------------------------------------------------------
 # Stage dependency graph
-# NOTE: We explicitly initialize STAGE_1 with an empty string to avoid unbound variable issues.
 # -----------------------------------------------------------------------------
 declare -A STAGE_DEPENDENCIES=(
   ["STAGE_1"]=""      # STAGE_1 has no dependencies
@@ -248,7 +246,6 @@ check_stage_dependencies() {
   fi
 
   # 2. Ensure $stage is defined in STAGE_DEPENDENCIES:
-  #    The +_ expansion avoids unbound variable errors even under `set -u`.
   if [ -z "${STAGE_DEPENDENCIES[$stage]+_}" ]; then
     err "check_stage_dependencies called with an undefined stage: $stage"
     return 1
@@ -313,15 +310,23 @@ check_network() {
   return 0
 }
 
+# -----------------------------------------------------------------------------
+# Make Docker check optional: 
+#   - If Docker is absent, warn & pass. 
+#   - If Docker is installed but daemon is not running, error.
+# -----------------------------------------------------------------------------
 check_docker_health() {
   if ! command -v docker &>/dev/null; then
-    err "Docker not installed or not in PATH."
-    return 1
+    warn "Docker not installed or not in PATH. Skipping Docker check."
+    return 0
   fi
+
+  # Docker command is found, but let's see if daemon is running:
   if ! docker ps &>/dev/null; then
-    err "Docker daemon not running."
+    err "Docker daemon found but not running."
     return 1
   fi
+
   log "Docker is healthy (daemon running)."
   return 0
 }
