@@ -2,8 +2,8 @@
 # shellcheck disable=SC1091,SC2154,SC2155
 
 ###############################################################################
-# n8n Quick Setup Bootstrap Script - Full Feature (Expanded)
-# Version: 0.400
+# n8n Quick Setup Bootstrap Script - Full Feature
+# Version: 0.401
 ###############################################################################
 
 set -euo pipefail
@@ -13,7 +13,7 @@ set -euo pipefail
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.400"
+SCRIPT_VERSION="0.401"
 STATUS_FILE="/tmp/n8n_bootstrap_status"
 LOG_FILE="/var/log/n8n_bootstrap.log"
 
@@ -22,14 +22,13 @@ MIN_MEM_MB=1024
 MIN_CPU_CORES=1
 
 declare -A MIN_PACKAGE_VERSIONS=(
-  # If you need more packages at certain minimum versions, add them here
   ["git"]="1:2.25.0"
   ["vim"]="2:8.1.2269"
 )
 
-# We’ll keep the same approach for stage dependencies:
+# Stage Dependencies
 declare -A STAGE_DEPENDENCIES=(
-  ["STAGE_1"]=""      # No dependency for Stage 1
+  ["STAGE_1"]=""
   ["STAGE_2"]="STAGE_1"
   ["STAGE_3"]="STAGE_2"
   ["STAGE_4"]="STAGE_3"
@@ -38,7 +37,7 @@ declare -A STAGE_DEPENDENCIES=(
   ["STAGE_7"]="STAGE_6"
 )
 
-# Rollback placeholders, one for each stage
+# Rollback placeholders
 declare -A ROLLBACK_ACTIONS=(
   ["STAGE_1"]="rollback_stage_1"
   ["STAGE_2"]="rollback_stage_2"
@@ -49,11 +48,11 @@ declare -A ROLLBACK_ACTIONS=(
   ["STAGE_7"]="rollback_stage_7"
 )
 
-# Vars for user creation, SSH config, etc.
+# ### CHANGED OR ADDED
+# We'll store the BOOT_USER inside the status file, so future runs still know who was created.
 BOOT_USER=""
 SSH_PORT=22
 
-# n8n repository references
 REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
 REPO_DIR="n8n_quick_setup"
 
@@ -123,13 +122,13 @@ is_stage_completed() {
   grep -qx "$1_COMPLETED" "$STATUS_FILE" 2>/dev/null
 }
 
-rollback_stage_1() { warn "rollback_stage_1: revert apt changes? (placeholder)"; }
-rollback_stage_2() { warn "rollback_stage_2: remove created user? (placeholder)"; }
-rollback_stage_3() { warn "rollback_stage_3: remove fail2ban? (placeholder)"; }
-rollback_stage_4() { warn "rollback_stage_4: revert UFW rules? (placeholder)"; }
-rollback_stage_5() { warn "rollback_stage_5: remove Docker? (placeholder)"; }
-rollback_stage_6() { warn "rollback_stage_6: remove cloned repo? (placeholder)"; }
-rollback_stage_7() { warn "rollback_stage_7: docker-compose down? (placeholder)"; }
+rollback_stage_1() { warn "rollback_stage_1 => revert apt changes? (placeholder)"; }
+rollback_stage_2() { warn "rollback_stage_2 => remove created user? (placeholder)"; }
+rollback_stage_3() { warn "rollback_stage_3 => remove fail2ban? (placeholder)"; }
+rollback_stage_4() { warn "rollback_stage_4 => revert UFW rules? (placeholder)"; }
+rollback_stage_5() { warn "rollback_stage_5 => remove Docker? (placeholder)"; }
+rollback_stage_6() { warn "rollback_stage_6 => remove cloned repo? (placeholder)"; }
+rollback_stage_7() { warn "rollback_stage_7 => docker-compose down? (placeholder)"; }
 
 stage_rollback() {
   local stage="$1"
@@ -143,6 +142,23 @@ stage_rollback() {
   fi
   sed -i "/^${stage}_COMPLETED$/d" "$STATUS_FILE"
   return 0
+}
+
+###############################################################################
+# READ/WRITE BOOT_USER to the status file
+###############################################################################
+store_user_in_status() {
+  local user="$1"
+  # Remove any existing line referencing CURRENT_BOOTSTRAP_USER
+  sed -i '/^CURRENT_BOOTSTRAP_USER=/d' "$STATUS_FILE" 2>/dev/null || true
+  echo "CURRENT_BOOTSTRAP_USER=$user" >> "$STATUS_FILE"
+}
+
+read_user_from_status() {
+  # If the file has a line like:
+  #   CURRENT_BOOTSTRAP_USER=david
+  # we parse it
+  grep '^CURRENT_BOOTSTRAP_USER=' "$STATUS_FILE" 2>/dev/null | cut -d= -f2
 }
 
 ###############################################################################
@@ -253,7 +269,6 @@ stage_1_system_preparation() {
     return 0
   fi
 
-  # This is effectively the old "system prep" steps
   check_disk_space || { stage_rollback "$STAGE"; return 1; }
   check_memory     || { stage_rollback "$STAGE"; return 1; }
   check_cpu        || { stage_rollback "$STAGE"; return 1; }
@@ -264,11 +279,11 @@ stage_1_system_preparation() {
     warn "Docker not installed => skipping Docker health check."
   else
     if ! docker ps &>/dev/null; then
-      warn "Docker daemon not running? You might need to 'systemctl start docker'."
+      warn "Docker daemon not running? Consider 'systemctl start docker'."
     fi
   fi
 
-  # Check OS
+  # OS check
   if ! $OS_OVERRIDE; then
     local os_id; os_id="$(. /etc/os-release; echo "$ID")"
     if [ "$os_id" != "ubuntu" ]; then
@@ -281,7 +296,6 @@ stage_1_system_preparation() {
     warn "OS override => skipping OS checks"
   fi
 
-  # do apt updates
   if ! $DRY_RUN; then
     apt-get update || true
     apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || true
@@ -300,7 +314,7 @@ stage_1_system_preparation() {
 }
 
 ###############################################################################
-# STAGE 2: User Setup + SSH Hardening  (merged from setup-user.sh)
+# STAGE 2: User Setup + SSH Hardening
 ###############################################################################
 stage_2_user_setup() {
   local STAGE="STAGE_2"
@@ -316,15 +330,20 @@ stage_2_user_setup() {
 
   if is_stage_completed "$STAGE"; then
     log "Stage 2 completed, skipping..."
+    # ### CHANGED OR ADDED
+    # Possibly read user from status if not in memory
+    if [ -z "$BOOT_USER" ]; then
+      BOOT_USER="$(read_user_from_status || true)"
+      if [ -n "$BOOT_USER" ]; then
+        log "Recovered BOOT_USER=$BOOT_USER from status."
+      else
+        warn "BOOT_USER not found in status, Stage 5 might fail if it needs it."
+      fi
+    fi
     return 0
   fi
 
-  # EXACT lines from old setup-user.sh:
-  #   adduser $USERNAME
-  #   usermod -aG sudo $USERNAME
-  #   secure ssh
-  #   etc.
-
+  # Ask or default
   if $INTERACTIVE; then
     read -rp "Please enter the desired username for n8n setup: " BOOT_USER
     read -rp "SSH port? [22]: " TMP_PORT
@@ -337,17 +356,17 @@ stage_2_user_setup() {
     log "Non-interactive => Using BOOT_USER=$BOOT_USER, SSH_PORT=$SSH_PORT"
   fi
 
+  # Validate user
   if [[ ! "$BOOT_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
     err "Invalid username => '$BOOT_USER'"
     stage_rollback "$STAGE"
     return 1
   fi
 
+  # Create user if missing
   if ! id -u "$BOOT_USER" &>/dev/null; then
-    # from setup-user.sh
-    log "Creating user => $BOOT_USER"
     if ! $DRY_RUN; then
-      adduser "$BOOT_USER"     # old script line
+      adduser "$BOOT_USER"
       usermod -aG sudo "$BOOT_USER"
     else
       log "Dry-run => skip user creation"
@@ -356,7 +375,7 @@ stage_2_user_setup() {
     warn "User $BOOT_USER already exists, continuing..."
   fi
 
-  # SSH Hardening:
+  # SSH Hardening
   if ! $DRY_RUN; then
     mkdir -p "/home/$BOOT_USER/.ssh"
     chmod 700 "/home/$BOOT_USER/.ssh"
@@ -375,13 +394,16 @@ stage_2_user_setup() {
     log "Dry-run => skip SSH config changes"
   fi
 
+  # ### CHANGED OR ADDED
+  store_user_in_status "$BOOT_USER"
+
   mark_stage_completed "$STAGE"
   log "--- STAGE 2 Completed ---"
   return 0
 }
 
 ###############################################################################
-# STAGE 3: Fail2Ban (merged from setup-fail2ban.sh)
+# STAGE 3: Fail2Ban
 ###############################################################################
 stage_3_fail2ban() {
   local STAGE="STAGE_3"
@@ -400,7 +422,6 @@ stage_3_fail2ban() {
     return 0
   fi
 
-  # EXACT lines from setup-fail2ban.sh
   if ! $DRY_RUN; then
     log "Installing Fail2Ban..."
     apt update && apt install -y fail2ban
@@ -432,7 +453,7 @@ EOF
 }
 
 ###############################################################################
-# STAGE 4: UFW (merged from setup-ufw.sh)
+# STAGE 4: UFW
 ###############################################################################
 stage_4_ufw() {
   local STAGE="STAGE_4"
@@ -451,7 +472,6 @@ stage_4_ufw() {
     return 0
   fi
 
-  # EXACT lines from setup-ufw.sh
   if ! $DRY_RUN; then
     log "Configuring UFW..."
     apt install -y ufw
@@ -459,7 +479,6 @@ stage_4_ufw() {
     ufw allow 80/tcp
     ufw allow 443/tcp
 
-    # If SSH_PORT != 22, we allow that
     if [ "$SSH_PORT" != "22" ]; then
       ufw allow "$SSH_PORT/tcp"
     fi
@@ -477,7 +496,7 @@ stage_4_ufw() {
 }
 
 ###############################################################################
-# STAGE 5: Docker (merged from setup-docker.sh)
+# STAGE 5: Docker
 ###############################################################################
 stage_5_docker() {
   local STAGE="STAGE_5"
@@ -496,17 +515,23 @@ stage_5_docker() {
     return 0
   fi
 
-  # EXACT lines from setup-docker.sh
-  if ! $DRY_RUN; then
-    log "Installing Docker + Compose..."
-    apt update && apt install -y docker.io docker-compose
-
-    # Add user to Docker group
+  # ### CHANGED OR ADDED
+  # If BOOT_USER was lost (script re-run?), read from status
+  if [ -z "$BOOT_USER" ]; then
+    BOOT_USER="$(read_user_from_status || true)"
     if [ -z "$BOOT_USER" ]; then
       err "BOOT_USER not set => Stage 2 incomplete?"
       stage_rollback "$STAGE"
       return 1
+    else
+      log "Recovered BOOT_USER=$BOOT_USER from status for Docker group."
     fi
+  fi
+
+  if ! $DRY_RUN; then
+    log "Installing Docker + Compose..."
+    apt update && apt install -y docker.io docker-compose
+
     usermod -aG docker "$BOOT_USER"
     systemctl enable docker
     systemctl start docker
@@ -523,7 +548,7 @@ stage_5_docker() {
 }
 
 ###############################################################################
-# STAGE 6: Clone the Repository (part of original bootstrap or separate script)
+# STAGE 6: Clone the Repository
 ###############################################################################
 stage_6_clone() {
   local STAGE="STAGE_6"
@@ -542,11 +567,14 @@ stage_6_clone() {
     return 0
   fi
 
-  # Make sure we have a user
+  # ### CHANGED OR ADDED
   if [ -z "$BOOT_USER" ]; then
-    err "BOOT_USER not set => Stage 2 incomplete?"
-    stage_rollback "$STAGE"
-    return 1
+    BOOT_USER="$(read_user_from_status || true)"
+    if [ -z "$BOOT_USER" ]; then
+      err "No user found => stage2 incomplete?"
+      stage_rollback "$STAGE"
+      return 1
+    fi
   fi
 
   local home_dir="/home/$BOOT_USER"
@@ -558,7 +586,7 @@ stage_6_clone() {
 
   if ! $DRY_RUN; then
     if [ -d "$home_dir/$REPO_DIR" ]; then
-      log "Repo directory exists => $home_dir/$REPO_DIR; fixing perms only"
+      log "Repo directory exists => $home_dir/$REPO_DIR; adjusting perms..."
       chown -R "$BOOT_USER:$BOOT_USER" "$home_dir/$REPO_DIR"
       chmod -R u+rwx "$home_dir/$REPO_DIR"
     else
@@ -576,7 +604,7 @@ stage_6_clone() {
 }
 
 ###############################################################################
-# STAGE 7: Deploy n8n + Docker Compose (like deploy-n8n.sh)
+# STAGE 7: Deploy n8n + Docker Compose
 ###############################################################################
 stage_7_deploy() {
   local STAGE="STAGE_7"
@@ -592,15 +620,19 @@ stage_7_deploy() {
 
   if is_stage_completed "$STAGE"; then
     log "Stage 7 done. Skipping..."
+    log "All stages completed!"
     return 0
   fi
 
-  # EXACT lines from deploy-n8n.sh (plus minor expansions)
   if [ -z "$BOOT_USER" ]; then
-    err "BOOT_USER not set => Stage 2 incomplete?"
-    stage_rollback "$STAGE"
-    return 1
+    BOOT_USER="$(read_user_from_status || true)"
+    if [ -z "$BOOT_USER" ]; then
+      err "No user found => stage2 incomplete?"
+      stage_rollback "$STAGE"
+      return 1
+    fi
   fi
+
   local home_dir="/home/$BOOT_USER"
   if [ ! -d "$home_dir/$REPO_DIR" ]; then
     err "Repo not found => $home_dir/$REPO_DIR. Stage 6 incomplete?"
@@ -613,7 +645,6 @@ stage_7_deploy() {
 set -e
 cd "$home_dir/$REPO_DIR"
 
-# Original lines from deploy-n8n.sh:
 echo "[LOG] Creating Docker volumes..."
 docker volume create caddy_data
 docker volume create n8n_data
