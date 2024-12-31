@@ -2,18 +2,18 @@
 # shellcheck disable=SC1091,SC2154,SC2155
 
 ###############################################################################
-# n8n Quick Setup Bootstrap Script - Full Feature (Compose Detection)
-# Version: 0.402
+# n8n Quick Setup Bootstrap Script - Full Feature (Compose .env detection)
+# Version: 0.403
 ###############################################################################
 
 set -euo pipefail
 
 ###############################################################################
-# GLOBAL CONFIG & ENVIRONMENT
+# GLOBAL CONFIG & ENV
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.402"
+SCRIPT_VERSION="0.403"
 STATUS_FILE="/tmp/n8n_bootstrap_status"
 LOG_FILE="/var/log/n8n_bootstrap.log"
 
@@ -140,7 +140,7 @@ stage_rollback() {
 }
 
 ###############################################################################
-# READ/WRITE BOOT_USER to the status file
+# READ/WRITE BOOT_USER
 ###############################################################################
 store_user_in_status() {
   local user="$1"
@@ -241,23 +241,6 @@ check_network() {
 }
 
 ###############################################################################
-# COMPOSE HELPER - auto-detect docker compose vs. docker-compose
-###############################################################################
-run_compose_up() {
-  local compose_file="$1"
-  # 1) Try the "docker compose" plugin command
-  if docker compose version &>/dev/null; then
-    docker compose -f "$compose_file" up -d
-  # 2) Otherwise fallback to the older "docker-compose"
-  elif command -v docker-compose &>/dev/null; then
-    docker-compose -f "$compose_file" up -d
-  else
-    err "No docker-compose or 'docker compose' plugin found. Please install Docker Compose."
-    return 1
-  fi
-}
-
-###############################################################################
 # STAGE 1: System Preparation
 ###############################################################################
 stage_1_system_preparation() {
@@ -269,7 +252,6 @@ stage_1_system_preparation() {
     warn "Forcing stage 1 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -282,12 +264,12 @@ stage_1_system_preparation() {
   check_cpu        || { stage_rollback "$STAGE"; return 1; }
   check_network    || { stage_rollback "$STAGE"; return 1; }
 
-  # Docker might not be installed => just a warning
+  # Docker might not be installed => just warn
   if ! command -v docker &>/dev/null; then
     warn "Docker not installed => skipping Docker health check."
   else
     if ! docker ps &>/dev/null; then
-      warn "Docker daemon not running? Consider 'systemctl start docker'."
+      warn "Docker daemon not running? systemctl start docker?"
     fi
   fi
 
@@ -333,7 +315,6 @@ stage_2_user_setup() {
     warn "Forcing stage 2 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -417,7 +398,6 @@ stage_3_fail2ban() {
     warn "Forcing stage 3 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -467,7 +447,6 @@ stage_4_ufw() {
     warn "Forcing stage 4 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -510,7 +489,6 @@ stage_5_docker() {
     warn "Forcing stage 5 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -560,7 +538,6 @@ stage_6_clone() {
     warn "Forcing stage 6 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -594,6 +571,18 @@ stage_6_clone() {
       chown -R "$BOOT_USER:$BOOT_USER" "$home_dir/$REPO_DIR"
       chmod -R u+rwx "$home_dir/$REPO_DIR"
     fi
+
+    # Check if there's a config/.env.example => rename/copy to config/.env if missing
+    if [ -f "$home_dir/$REPO_DIR/config/.env.example" ]; then
+      if [ ! -f "$home_dir/$REPO_DIR/config/.env" ]; then
+        log "Creating config/.env from .env.example"
+        cp "$home_dir/$REPO_DIR/config/.env.example" "$home_dir/$REPO_DIR/config/.env"
+        chown "$BOOT_USER:$BOOT_USER" "$home_dir/$REPO_DIR/config/.env"
+      fi
+    else
+      warn "No .env.example found in config/ => environment variables might be empty!"
+    fi
+
   else
     log "Dry-run => skip cloning repository"
   fi
@@ -615,7 +604,6 @@ stage_7_deploy() {
     warn "Forcing stage 7 re-run..."
     sed -i "/^${STAGE}_COMPLETED$/d" "$STATUS_FILE" || true
   fi
-
   check_stage_dependencies "$STAGE" || return 1
 
   if is_stage_completed "$STAGE"; then
@@ -650,19 +638,19 @@ docker volume create caddy_data
 docker volume create n8n_data
 
 echo "[LOG] Starting Docker Compose (docker-compose.yml in config/)..."
-# <-- Use the run_compose_up function from within a sub-shell:
-# We can't call the shell function directly inside HEREDOC,
-# so we either replicate it or just do "docker-compose" directly.
 
-# Instead, let's do the "classic" approach: 
-#   docker-compose -f config/docker-compose.yml up -d
-# or "docker compose -f ... up -d"
-# We'll do a quick check here, or replicate run_compose_up logic:
+# We'll specify --env-file explicitly if config/.env is present
+if [ -f "config/.env" ]; then
+  ENV_FLAG="--env-file config/.env"
+else
+  ENV_FLAG=""
+fi
 
+# Compose v2 or classic docker-compose?
 if docker compose version &>/dev/null; then
-  docker compose -f config/docker-compose.yml up -d
+  docker compose \$ENV_FLAG -f config/docker-compose.yml up -d
 elif command -v docker-compose &>/dev/null; then
-  docker-compose -f config/docker-compose.yml up -d
+  docker-compose \$ENV_FLAG -f config/docker-compose.yml up -d
 else
   echo "[ERR] No docker-compose or 'docker compose' found!"
   exit 1
