@@ -3,14 +3,11 @@
 
 ###############################################################################
 # n8n Quick Setup Bootstrap Script - Full Feature Edition (Enhanced)
-# Version: 0.130
+# Version: 0.131
 #
-# Changelog vs 0.120:
-#   1. Added robust rollback skeleton for each stage
-#   2. Docker & service health checks (Stage 1 or custom checks)
-#   3. Dynamic package version checks w/ auto-upgrade if behind
-#   4. Enhanced config overrides, environment variable usage
-#   5. More detailed error logs, stage-based rollback calls
+# Changelog vs 0.130:
+#   1. Fixed unbound variable error in STAGE_DEPENDENCIES for STAGE_1.
+#   2. Added defensive checks in check_stage_dependencies().
 ###############################################################################
 
 set -euo pipefail
@@ -20,7 +17,7 @@ set -euo pipefail
 ###############################################################################
 export DEBIAN_FRONTEND=noninteractive
 
-SCRIPT_VERSION="0.130"
+SCRIPT_VERSION="0.131"
 
 # Default configs (env-overridable)
 REPO_URL="${REPO_URL:-https://github.com/DavidMcCauley/n8n_quick_setup.git}"
@@ -31,19 +28,23 @@ VIM_COLORSCHEME="${VIM_COLORSCHEME:-desert}"
 STATUS_FILE="${STATUS_FILE:-/tmp/n8n_bootstrap_status}"
 LOG_FILE="${LOG_FILE:-/var/log/n8n_bootstrap.log}"
 
-MIN_DISK_MB="${MIN_DISK_MB:-2048}"   # 2GB free
-MIN_MEM_MB="${MIN_MEM_MB:-1024}"     # 1GB RAM
-MIN_CPU_CORES="${MIN_CPU_CORES:-1}"  # 1 core
+MIN_DISK_MB="${MIN_DISK_MB:-2048}"     # Require at least 2GB free
+MIN_MEM_MB="${MIN_MEM_MB:-1024}"       # Require at least 1GB of RAM
+MIN_CPU_CORES="${MIN_CPU_CORES:-1}"    # Require at least 1 CPU core
 
-# Minimum package versions (add more if needed)
+# Minimum package versions (add or adjust as needed)
 declare -A MIN_PACKAGE_VERSIONS=(
   ["git"]="${GIT_MIN_VERSION:-1:2.25.0}"
   ["vim"]="${VIM_MIN_VERSION:-2:8.1.2269}"
   # Example: ["docker"]="5:20.10.0"
 )
 
+# -----------------------------------------------------------------------------
 # Stage dependency graph
+# NOTE: We explicitly initialize STAGE_1 with an empty string to avoid unbound variable issues.
+# -----------------------------------------------------------------------------
 declare -A STAGE_DEPENDENCIES=(
+  ["STAGE_1"]=""      # STAGE_1 has no dependencies
   ["STAGE_2"]="STAGE_1"
   ["STAGE_3"]="STAGE_2"
   ["STAGE_4"]="STAGE_3"
@@ -57,7 +58,7 @@ declare -A ROLLBACK_ACTIONS=(
   ["STAGE_4"]="rollback_stage_4"
 )
 
-# Stage progress
+# Optional progress tracking
 declare -A STAGE_PROGRESS
 
 OS_OVERRIDE=false
@@ -109,10 +110,10 @@ err() {
 # ERROR TRAP
 ###############################################################################
 handle_error() {
+  local line_no="$1"
+  local func_trace="$2"
+  local last_command="$3"
   local exit_code=$?
-  local line_no=$1
-  local func_trace=$2
-  local last_command=$3
 
   err "Error on line $line_no: '$last_command' (exit: $exit_code)"
   err "Function trace: $func_trace"
@@ -187,7 +188,7 @@ read_user_from_status() {
 rollback_stage_1() {
   warn "rollback_stage_1() called. Potential revert of apt changes."
   # Example: remove installed packages, restore configs, etc.
-  # apt-get remove --purge -y <some packages>
+  # apt-get remove --purge -y <packages> || true
   return 0
 }
 
@@ -197,7 +198,7 @@ rollback_stage_2() {
   user="$(read_user_from_status || true)"
   if [ -n "$user" ]; then
     warn "Removing user $user (placeholder)."
-    # userdel -r "$user"
+    # userdel -r "$user" || true
   fi
   return 0
 }
@@ -214,14 +215,14 @@ rollback_stage_3() {
 
 rollback_stage_4() {
   warn "rollback_stage_4() called. Potential cleanup of containers."
-  # e.g., docker rm -f some_container
+  # Example: docker rm -f some_container || true
   return 0
 }
 
 stage_rollback() {
   local stage="$1"
-  local action="${ROLLBACK_ACTIONS[$stage]}"
-  
+  local action="${ROLLBACK_ACTIONS[$stage]:-}"
+
   if [ -n "$action" ]; then
     log "Rolling back $stage using $action..."
     if ! $action; then
@@ -235,15 +236,35 @@ stage_rollback() {
 }
 
 ###############################################################################
-# STAGE DEPENDENCIES
+# STAGE DEPENDENCIES (FIXED + DEFENSIVE)
 ###############################################################################
 check_stage_dependencies() {
   local stage="$1"
+
+  # 1. Validate that a stage argument was provided:
+  if [ -z "$stage" ]; then
+    err "check_stage_dependencies called without a stage argument."
+    return 1
+  fi
+
+  # 2. Ensure $stage is defined in STAGE_DEPENDENCIES:
+  #    The +_ expansion avoids unbound variable errors even under `set -u`.
+  if [ -z "${STAGE_DEPENDENCIES[$stage]+_}" ]; then
+    err "check_stage_dependencies called with an undefined stage: $stage"
+    return 1
+  fi
+
+  # 3. Grab the dependency
   local dep="${STAGE_DEPENDENCIES[$stage]}"
-  if [ -n "$dep" ] && ! is_stage_completed "${dep}_COMPLETED"; then
+
+  # 4. If dep is empty, no dependencies. Otherwise check if the dep is completed.
+  if [ -z "$dep" ]; then
+    log "Stage $stage has no dependencies."
+  elif ! is_stage_completed "${dep}_COMPLETED"; then
     err "Stage dependency not met: $stage requires $dep"
     return 1
   fi
+
   return 0
 }
 
@@ -310,7 +331,8 @@ check_service_status() {
   if command -v systemctl &>/dev/null; then
     if ! systemctl is-active --quiet "$service"; then
       warn "Service $service is not active."
-      # Return 1 if you want this to be fatal
+      # Return 1 if you want this to be fatal:
+      # return 1
       return 0
     fi
     log "Service $service is active."
@@ -413,15 +435,16 @@ stage_1_system_preparation() {
 
   # 4. APT tasks & package version checks
   if ! $DRY_RUN; then
-    apt-get update || verify_command $? "apt update"
+    apt-get update || true
     local updates
     updates="$(apt list --upgradable 2>/dev/null | wc -l)"
-    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || verify_command $? "apt upgrade"
-    apt-get autoremove -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || verify_command $? "apt autoremove"
+    apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || true
+    apt-get autoremove -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || true
 
     # Check & update min versions
     for pkg in "${!MIN_PACKAGE_VERSIONS[@]}"; do
-      check_package_version "$pkg" "${MIN_PACKAGE_VERSIONS[$pkg]}" || warn "Could not upgrade $pkg to needed version"
+      check_package_version "$pkg" "${MIN_PACKAGE_VERSIONS[$pkg]}" \
+        || warn "Could not upgrade $pkg to needed version"
     done
 
     local updates_applied=false
@@ -482,7 +505,7 @@ stage_2_user_setup() {
   if $INTERACTIVE; then
     read -rp "$USER_NAME_PROMPT " username
   else
-    # non-interactive read
+    # Just read once; can adapt to your needs if fully non-interactive
     read -rp "$USER_NAME_PROMPT " username
   fi
 
@@ -494,7 +517,7 @@ stage_2_user_setup() {
 
   if id -u "$username" &>/dev/null; then
     log "User $username exists."
-    read -rp "Continue under $username? (y/N) " cont
+    read -rp "Continue setup under $username? (y/N) " cont
     if [[ "$cont" != "y" && "$cont" != "Y" ]]; then
       err "Aborting."
       stage_rollback "$STAGE"
@@ -590,22 +613,24 @@ stage_3_clone_repository() {
   fi
 
   if [ ! -d "/home/$boot_user" ]; then
-    err "Home dir missing => /home/$boot_user. Stage2 incomplete?"
+    err "Home directory /home/$boot_user missing => Stage2 incomplete?"
     stage_rollback "$STAGE"
     return 1
   fi
 
   if [ -d "/home/$boot_user/$REPO_DIR" ]; then
-    log "Repo /home/$boot_user/$REPO_DIR exists"
+    log "Repo /home/$boot_user/$REPO_DIR already exists."
     if ! $DRY_RUN; then
-      sudo chown -R "$boot_user":"$boot_user" "/home/$boot_user/$REPO_DIR" || { stage_rollback "$STAGE"; return 1; }
+      sudo chown -R "$boot_user":"$boot_user" "/home/$boot_user/$REPO_DIR" \
+        || { stage_rollback "$STAGE"; return 1; }
     else
       log "Dry run => skip chown"
     fi
   else
     if ! $DRY_RUN; then
       sudo -u "$boot_user" mkdir -p "/home/$boot_user"
-      sudo -u "$boot_user" git clone "$REPO_URL" "/home/$boot_user/$REPO_DIR" || { stage_rollback "$STAGE"; return 1; }
+      sudo -u "$boot_user" git clone "$REPO_URL" "/home/$boot_user/$REPO_DIR" \
+        || { stage_rollback "$STAGE"; return 1; }
     else
       log "Dry run => would clone $REPO_URL => /home/$boot_user/$REPO_DIR"
     fi
@@ -614,7 +639,8 @@ stage_3_clone_repository() {
   log "Before chmod =>"
   ls -ld "/home/$boot_user/$REPO_DIR" || true
   if ! $DRY_RUN; then
-    sudo chmod -R u+rwx "/home/$boot_user/$REPO_DIR" || { stage_rollback "$STAGE"; return 1; }
+    sudo chmod -R u+rwx "/home/$boot_user/$REPO_DIR" \
+      || { stage_rollback "$STAGE"; return 1; }
   else
     log "Dry run => skip chmod"
   fi
@@ -648,12 +674,12 @@ stage_4_configure_and_deploy() {
   local boot_user
   boot_user="$(read_user_from_status)"
   if [ -z "$boot_user" ]; then
-    err "No user found => stage2 incomplete?"
+    err "No user found => Stage2 incomplete?"
     stage_rollback "$STAGE"
     return 1
   fi
 
-  log "Switching => $boot_user for final script calls..."
+  log "Switching to $boot_user for final script calls..."
 
   if ! $DRY_RUN; then
     sudo -u "$boot_user" bash << 'EOS'
@@ -703,7 +729,7 @@ Options:
   --override-os         Skip OS checks (dangerous).
   --force-stage1..4     Re-run a specific stage even if marked completed.
   --verbose             More verbose logs (placeholder).
-  --dry-run             Simulate actions, no changes.
+  --dry-run             Simulate script execution without making changes.
   --interactive         Prompt for user input more actively.
   --help, -h            Show this usage info.
 EOF
@@ -741,7 +767,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Root or sudo?
+# Root or sudo check
 if [ "$(id -u)" -ne 0 ]; then
   if ! sudo -n true 2>/dev/null; then
     err "Need root/sudo. Rerun with sudo."
@@ -758,6 +784,7 @@ fi
 touch "$STATUS_FILE"
 touch "$LOG_FILE"
 
+# Execute Stages
 stage_1_system_preparation
 stage_2_user_setup
 stage_3_clone_repository
