@@ -724,7 +724,7 @@ stage_7_deploy_n8n() {
   sudo -u "$boot_user" bash <<EOF
     set -e
     cd "$CONFIG_PATH"
-    docker compose -f docker-compose.yml up -d
+    docker-compose -f docker-compose.yml up -d
 EOF
   verify_command $? "Docker Compose up"
 
