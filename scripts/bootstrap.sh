@@ -34,7 +34,7 @@ SCRIPT_VERSION="0.500"
 
 # Directory to clone the repository into:
 REPO_NAME="n8n_quick_setup"
-REPO_URL="https://github.com/DavidMcCauley/n8n_quick_setup.git"
+REPO_URL="https://github.com/subjec2change/n8n_quick_setup.git"
 
 # Some default minimum versions
 declare -A MIN_PACKAGE_VERSIONS=(
@@ -426,7 +426,7 @@ stage_2_user_setup() {
   if $INTERACTIVE; then
     read -rp "Please enter the desired username for n8n setup: " USERNAME
   else
-    USERNAME="david"
+    USERNAME="thx1138"
     log "Non-interactive: defaulting to username=$USERNAME"
   fi
 
