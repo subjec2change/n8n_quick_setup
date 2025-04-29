@@ -1,4 +1,4 @@
-n8n.yourdomain.com {
+automate.raremang.biz {
     tls {
         dns namecheap {
           api_user    ${NAMECHEAP_USERNAME}
@@ -6,7 +6,7 @@ n8n.yourdomain.com {
           api_ip      ${NAMECHEAP_SOURCEIP}
         }
     }
-    reverse_proxy n8n:5678 {
+    reverse_proxy automate:5678 {
         flush_interval -1
     }
 }
