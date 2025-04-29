@@ -464,7 +464,7 @@ docker run --rm -v n8n_data:/data -v $(pwd):/backup ubuntu \
    ```
 4. **Confirm** your containers are up:
    ```bash
-   docker compose -f config/docker-compose.yml ps
+   docker-compose -f config/docker-compose.yml ps
    ```
 5. **Access** n8n at:
    ```
