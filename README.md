@@ -1,7 +1,7 @@
 # n8n Server Setup
 
 
-NOTE (12-29-2024) THIS IS A ROUGH DRAFT!
+NOTE (4/29/2025) THIS IS A ROUGH DRAFT!
 
 This repository is a collection of scripts to help automate the setup and deployment of n8n on an Ubuntu 22 VPS using Docker, Docker Compose, and Caddy for HTTPS. It also includes Portainer for container management, PostgreSQL for n8n’s database, and instructions for advanced setups like VPN access and DNS-01 challenges.
 
